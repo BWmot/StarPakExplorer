@@ -1,0 +1,33 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StarPakExplorer.UI", "StarPakExplorer.UI\StarPakExplorer.UI.csproj", "{84B0F0D5-8B02-4E5C-B662-E40A98370D26}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StarPakExplorer.Application", "StarPakExplorer.Application\StarPakExplorer.Application.csproj", "{5F62F06A-BA96-4F8C-ACF5-B36D7213510B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StarPakExplorer.Infrastructure", "StarPakExplorer.Infrastructure\StarPakExplorer.Infrastructure.csproj", "{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{84B0F0D5-8B02-4E5C-B662-E40A98370D26}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{84B0F0D5-8B02-4E5C-B662-E40A98370D26}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{84B0F0D5-8B02-4E5C-B662-E40A98370D26}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{84B0F0D5-8B02-4E5C-B662-E40A98370D26}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5F62F06A-BA96-4F8C-ACF5-B36D7213510B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F62F06A-BA96-4F8C-ACF5-B36D7213510B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F62F06A-BA96-4F8C-ACF5-B36D7213510B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F62F06A-BA96-4F8C-ACF5-B36D7213510B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
