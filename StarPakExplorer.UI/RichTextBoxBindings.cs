@@ -25,7 +25,7 @@ public static class RichTextBoxBindings
 
     private static void OnBoundDocumentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not RichTextBox richTextBox)
+        if (d is not System.Windows.Controls.RichTextBox richTextBox)
         {
             return;
         }

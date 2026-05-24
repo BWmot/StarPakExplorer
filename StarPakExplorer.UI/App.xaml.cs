@@ -7,6 +7,7 @@ using StarPakExplorer.Infrastructure.Files;
 using StarPakExplorer.Infrastructure.Indexing;
 using StarPakExplorer.Infrastructure.Logging;
 using StarPakExplorer.Infrastructure.Metadata;
+using StarPakExplorer.Infrastructure.Patches;
 using StarPakExplorer.Infrastructure.Settings;
 using StarPakExplorer.Infrastructure.Unpacking;
 using StarPakExplorer.UI.ViewModels;
@@ -22,8 +23,8 @@ public partial class App : System.Windows.Application
         var logger = new FileAppLogger();
         var settingsStore = new JsonAppSettingsStore();
         var cacheRepository = new CacheRepository();
-        var stagingStore = new FileStagingStore(cacheRepository);
         var appSettings = LoadSettings(settingsStore);
+        var patchStore = new PatchStore(appSettings);
         var service = new PakExplorerService(
             new AssetUnpacker(logger),
             cacheRepository,
@@ -34,7 +35,7 @@ public partial class App : System.Windows.Application
 
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(service, logger, settingsStore, stagingStore, appSettings)
+            DataContext = new MainViewModel(service, logger, settingsStore, patchStore, appSettings)
         };
         MainWindow = window;
         window.Show();

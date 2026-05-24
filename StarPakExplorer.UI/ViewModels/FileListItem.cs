@@ -93,6 +93,7 @@ public sealed class FileListItem
             or ".monsterpart"
             or ".monstertype"
             or ".npctype"
+            or ".behavior"
             or ".biome"
             or ".surfacebiome"
             or ".undergroundbiome"

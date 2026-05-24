@@ -11,7 +11,7 @@ public static class PreviewDocumentBuilder
     {
         var document = new FlowDocument
         {
-            FontFamily = new FontFamily("Consolas"),
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
             FontSize = 13,
             PagePadding = new Thickness(0),
             ColumnWidth = double.PositiveInfinity
@@ -58,11 +58,11 @@ public static class PreviewDocumentBuilder
         return document;
     }
 
-    private static Brush CreateBrush(string colorCode)
+    private static System.Windows.Media.Brush CreateBrush(string colorCode)
     {
         try
         {
-            var brush = (Brush)new BrushConverter().ConvertFromString(colorCode)!;
+            var brush = (System.Windows.Media.Brush)new BrushConverter().ConvertFromString(colorCode)!;
             if (brush.CanFreeze)
             {
                 brush.Freeze();
@@ -72,7 +72,7 @@ public static class PreviewDocumentBuilder
         }
         catch
         {
-            return Brushes.Black;
+            return System.Windows.Media.Brushes.Black;
         }
     }
 }

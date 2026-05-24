@@ -41,6 +41,7 @@ public sealed class TextFileReader : ITextFileReader
         ".monsterpart",
         ".monstertype",
         ".npctype",
+        ".behavior",
         ".biome",
         ".surfacebiome",
         ".undergroundbiome",

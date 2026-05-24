@@ -30,6 +30,7 @@ public static class StarboundFileClassifier
         ".monstertype",
         ".monsterpart",
         ".monsterskill",
+        ".behavior",
         ".treasurepools",
         ".treasurechests",
         ".tech",

@@ -17,7 +17,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly PakExplorerService pakExplorerService;
     private readonly IAppLogger logger;
     private readonly IAppSettingsStore settingsStore;
-    private readonly IFileStagingStore fileStagingStore;
+    private readonly IPatchStore patchStore;
     private readonly AppSettings appSettings;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly ObservableCollection<FileListItem> allFiles = [];
@@ -52,13 +52,13 @@ public sealed class MainViewModel : ViewModelBase
         PakExplorerService pakExplorerService,
         IAppLogger logger,
         IAppSettingsStore settingsStore,
-        IFileStagingStore fileStagingStore,
+        IPatchStore patchStore,
         AppSettings appSettings)
     {
         this.pakExplorerService = pakExplorerService;
         this.logger = logger;
         this.settingsStore = settingsStore;
-        this.fileStagingStore = fileStagingStore;
+        this.patchStore = patchStore;
         this.appSettings = appSettings;
 
         assetUnpackerPath = appSettings.AssetUnpackerPath;
@@ -88,6 +88,8 @@ public sealed class MainViewModel : ViewModelBase
         RefreshCacheOverviewCommand = new AsyncRelayCommand(RefreshCacheOverviewAsync, () => true);
         SearchCommand = new AsyncRelayCommand(SearchAsync, CanSearch);
         ScanDuplicateItemNamesCommand = new AsyncRelayCommand(ScanDuplicateItemNamesAsync, () => !IsBusy && currentManifest is not null);
+        OpenSettingsCommand = new RelayCommand(OpenSettings, () => !IsBusy);
+        OpenPatchManagerCommand = new RelayCommand(OpenPatchManager, () => !IsBusy);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
         ClearExtensionSelectionCommand = new RelayCommand(ClearExtensionSelection, CanModifyExtensions);
         SelectAllCacheEntriesCommand = new RelayCommand(SelectAllCacheEntries, CanModifyCacheEntries);
@@ -125,6 +127,10 @@ public sealed class MainViewModel : ViewModelBase
     public AsyncRelayCommand SearchCommand { get; }
 
     public AsyncRelayCommand ScanDuplicateItemNamesCommand { get; }
+
+    public RelayCommand OpenSettingsCommand { get; }
+
+    public RelayCommand OpenPatchManagerCommand { get; }
 
     public RelayCommand SelectAllExtensionsCommand { get; }
 
@@ -222,6 +228,10 @@ public sealed class MainViewModel : ViewModelBase
 
     public bool PreviewModeSwitchVisible => CurrentPreviewKind == PreviewKind.Text;
 
+    public bool IsSourceTextPreviewVisible => CurrentPreviewKind == PreviewKind.Text && CurrentPreviewTextMode == PreviewTextMode.Source;
+
+    public bool IsReadingTextPreviewVisible => CurrentPreviewKind == PreviewKind.Text && CurrentPreviewTextMode == PreviewTextMode.Reading;
+
     public string PreviewModeHintText => previewHasFormatting
         ? "检测到 Starbound 颜色码"
         : "";
@@ -257,6 +267,8 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsUnsupportedPreviewVisible));
             OnPropertyChanged(nameof(PreviewModeSwitchVisible));
             OnPropertyChanged(nameof(PreviewModeHintText));
+            OnPropertyChanged(nameof(IsSourceTextPreviewVisible));
+            OnPropertyChanged(nameof(IsReadingTextPreviewVisible));
         }
     }
 
@@ -279,6 +291,8 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(CurrentPreviewTextMode));
         OnPropertyChanged(nameof(IsSourcePreviewMode));
         OnPropertyChanged(nameof(IsReadingPreviewMode));
+        OnPropertyChanged(nameof(IsSourceTextPreviewVisible));
+        OnPropertyChanged(nameof(IsReadingTextPreviewVisible));
         UpdatePreviewText();
     }
 
@@ -393,7 +407,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task SelectUnpackerAsync()
     {
-        var dialog = new OpenFileDialog
+        var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择 Starbound asset_unpacker.exe",
             Filter = "asset_unpacker.exe|asset_unpacker.exe|Executable|*.exe|All files|*.*",
@@ -417,7 +431,7 @@ public sealed class MainViewModel : ViewModelBase
             return;
         }
 
-        var dialog = new OpenFileDialog
+        var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择 .pak 或 contents.pak",
             Filter = "Starbound PAK|*.pak|All files|*.*",
@@ -584,7 +598,7 @@ public sealed class MainViewModel : ViewModelBase
 
         var selectedBytes = selectedEntries.Sum(entry => entry.CacheBytes);
         var message = $"确定删除选中的 {selectedEntries.Count} 个缓存吗？\n\n总占用：{FormatBytes(selectedBytes)}";
-        var confirmed = MessageBox.Show(message, "StarPakExplorer", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        var confirmed = System.Windows.MessageBox.Show(message, "StarPakExplorer", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
         if (!confirmed)
         {
             return;
@@ -650,7 +664,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private async Task DeleteCacheEntryAsync(CacheEntrySummary summary)
     {
-        var confirmed = MessageBox.Show(
+        var confirmed = System.Windows.MessageBox.Show(
             $"确定删除这个缓存吗？\n\n{summary.DisplayName}\n{summary.PakPath}",
             "StarPakExplorer",
             MessageBoxButton.YesNo,
@@ -873,7 +887,7 @@ public sealed class MainViewModel : ViewModelBase
         {
             logger.Error(errorTitle, exception);
             StatusMessage = errorTitle;
-            MessageBox.Show(exception.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(exception.Message, errorTitle, MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -935,10 +949,10 @@ public sealed class MainViewModel : ViewModelBase
         {
             Owner = System.Windows.Application.Current?.MainWindow,
             DataContext = new FileModifyViewModel(
-                currentManifest.CacheKey,
+                currentManifest,
                 item,
                 pakExplorerService,
-                fileStagingStore,
+                patchStore,
                 logger)
         };
 
@@ -950,6 +964,32 @@ public sealed class MainViewModel : ViewModelBase
                 window.Close();
             };
         }
+
+        window.ShowDialog();
+    }
+
+    private void OpenSettings()
+    {
+        var window = new SettingsWindow
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            DataContext = new SettingsViewModel(appSettings, settingsStore, logger)
+        };
+
+        if (window.ShowDialog() == true)
+        {
+            ApplySettingsSnapshot();
+            StatusMessage = "设置已保存";
+        }
+    }
+
+    private void OpenPatchManager()
+    {
+        var window = new PatchManagerWindow
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            DataContext = new PatchManagerViewModel(patchStore, logger, currentManifest)
+        };
 
         window.ShowDialog();
     }
@@ -983,6 +1023,8 @@ public sealed class MainViewModel : ViewModelBase
         SelectAllCacheEntriesCommand.RaiseCanExecuteChanged();
         ClearCacheSelectionCommand.RaiseCanExecuteChanged();
         OpenModifyWindowCommand.RaiseCanExecuteChanged();
+        OpenSettingsCommand.RaiseCanExecuteChanged();
+        OpenPatchManagerCommand.RaiseCanExecuteChanged();
         RaiseImageCommandStates();
     }
 
@@ -1022,6 +1064,12 @@ public sealed class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedFileSection));
     }
 
+    private void ApplySettingsSnapshot()
+    {
+        AssetUnpackerPath = appSettings.AssetUnpackerPath;
+        lastPakDirectory = appSettings.PakParentDirectory;
+    }
+
     private static string BuildMetadataSummary(PakManifest manifest)
     {
         var parts = new List<string>();
@@ -1057,7 +1105,7 @@ public sealed class MainViewModel : ViewModelBase
 
     private static void ShowWarning(string message)
     {
-        MessageBox.Show(message, "StarPakExplorer", MessageBoxButton.OK, MessageBoxImage.Information);
+        System.Windows.MessageBox.Show(message, "StarPakExplorer", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private static BitmapImage CreateBitmapImage(byte[] bytes)

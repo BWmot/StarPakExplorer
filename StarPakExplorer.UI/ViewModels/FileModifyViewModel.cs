@@ -15,11 +15,13 @@ namespace StarPakExplorer.UI.ViewModels;
 public sealed class FileModifyViewModel : ViewModelBase
 {
     private readonly PakExplorerService pakExplorerService;
-    private readonly IFileStagingStore stagingStore;
+    private readonly IPatchStore patchStore;
     private readonly IAppLogger logger;
-    private readonly string cacheKey;
+    private readonly PakManifest manifest;
+    private readonly string patchKey;
     private readonly FileListItem fileItem;
     private readonly CancellationTokenSource cancellationTokenSource = new();
+
     private string statusMessage = "正在加载...";
     private string editableText = "";
     private string selectedEncodingName = "UTF-8";
@@ -30,17 +32,18 @@ public sealed class FileModifyViewModel : ViewModelBase
     private bool isSaving;
 
     public FileModifyViewModel(
-        string cacheKey,
+        PakManifest manifest,
         FileListItem fileItem,
         PakExplorerService pakExplorerService,
-        IFileStagingStore stagingStore,
+        IPatchStore patchStore,
         IAppLogger logger)
     {
-        this.cacheKey = cacheKey;
+        this.manifest = manifest;
         this.fileItem = fileItem;
         this.pakExplorerService = pakExplorerService;
-        this.stagingStore = stagingStore;
+        this.patchStore = patchStore;
         this.logger = logger;
+        patchKey = patchStore.GetPatchKey(manifest);
 
         EncodingOptions =
         [
@@ -159,7 +162,7 @@ public sealed class FileModifyViewModel : ViewModelBase
     }
 
     public string ModeHintText => StarboundMarkup.ContainsFormatting(EditableText)
-        ? "检测到 Starbound 颜色码，可切换阅读模式查看"
+        ? "检测到 Starbound 颜色码，可切换到阅读模式查看"
         : "";
 
     public bool IsBusy
@@ -178,12 +181,13 @@ public sealed class FileModifyViewModel : ViewModelBase
     {
         try
         {
+            await patchStore.EnsurePatchSetAsync(manifest, cancellationTokenSource.Token);
             var preview = await pakExplorerService.GetPreviewAsync(fileItem.File, cancellationTokenSource.Token);
             StatusMessage = fileItem.DisplayPath;
 
             if (preview.Kind == PreviewKind.Text)
             {
-                EditableText = LoadInitialText(preview.SourceContent);
+                EditableText = preview.SourceContent;
                 PreviewDocument = PreviewDocumentBuilder.Build(EditableText);
             }
             else if (preview.Kind == PreviewKind.Image && preview.ImageBytes is { Length: > 0 })
@@ -206,7 +210,7 @@ public sealed class FileModifyViewModel : ViewModelBase
 
     private void SelectReplacement()
     {
-        var dialog = new OpenFileDialog
+        var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择替换文件",
             CheckFileExists = true,
@@ -242,14 +246,28 @@ public sealed class FileModifyViewModel : ViewModelBase
         {
             if (IsTextFile)
             {
-                var encoding = EncodingOptions.First(option => string.Equals(option.Name, SelectedEncodingName, StringComparison.OrdinalIgnoreCase)).Encoding;
-                await stagingStore.SaveTextAsync(cacheKey, fileItem.File.RelativePath, EditableText, encoding, cancellationTokenSource.Token);
-                StatusMessage = "文本已保存到 staging";
+                var encoding = EncodingOptions
+                    .First(option => string.Equals(option.Name, SelectedEncodingName, StringComparison.OrdinalIgnoreCase))
+                    .Encoding;
+
+                await patchStore.SaveTextAsync(
+                    patchKey,
+                    fileItem.File.RelativePath,
+                    EditableText,
+                    encoding,
+                    cancellationTokenSource.Token);
+
+                StatusMessage = "文本已保存到补丁";
             }
             else if (CanReplaceBinary)
             {
-                await stagingStore.SaveReplacementAsync(cacheKey, fileItem.File.RelativePath, ReplacementPath, cancellationTokenSource.Token);
-                StatusMessage = "替换文件已保存到 staging";
+                await patchStore.SaveReplacementAsync(
+                    patchKey,
+                    fileItem.File.RelativePath,
+                    ReplacementPath,
+                    cancellationTokenSource.Token);
+
+                StatusMessage = "替换文件已保存到补丁";
             }
 
             RequestClose?.Invoke(true);
@@ -258,7 +276,7 @@ public sealed class FileModifyViewModel : ViewModelBase
         {
             logger.Error("保存修改失败", exception);
             StatusMessage = exception.Message;
-            MessageBox.Show(exception.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(exception.Message, "保存失败", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -270,11 +288,6 @@ public sealed class FileModifyViewModel : ViewModelBase
     {
         PreviewDocument = PreviewDocumentBuilder.Build(EditableText);
         OnPropertyChanged(nameof(ModeHintText));
-    }
-
-    private static string LoadInitialText(string sourceContent)
-    {
-        return sourceContent;
     }
 
     private static BitmapImage CreateBitmapImage(byte[] bytes)
