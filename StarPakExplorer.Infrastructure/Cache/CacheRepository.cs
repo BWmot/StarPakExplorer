@@ -58,6 +58,12 @@ public sealed class CacheRepository : ICacheRepository
         return await JsonSerializer.DeserializeAsync<PakManifest>(stream, JsonOptions, cancellationToken);
     }
 
+    public async Task<PakManifest?> TryLoadManifestByPakPathAsync(string pakPath, CancellationToken cancellationToken)
+    {
+        var cacheKey = GetCacheKey(pakPath);
+        return await TryLoadManifestAsync(cacheKey, cancellationToken);
+    }
+
     public Task PrepareFreshCacheAsync(string cacheKey, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -82,6 +88,19 @@ public sealed class CacheRepository : ICacheRepository
         await JsonSerializer.SerializeAsync(stream, manifest, JsonOptions, cancellationToken);
     }
 
+    public Task DeleteAsync(string cacheKey, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var cacheDirectory = GetCacheDirectory(cacheKey);
+        if (Directory.Exists(cacheDirectory))
+        {
+            Directory.Delete(cacheDirectory, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public Task ClearAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -95,8 +114,95 @@ public sealed class CacheRepository : ICacheRepository
         return Task.CompletedTask;
     }
 
+    public Task<CacheOverview> GetOverviewAsync(int maxEntries, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!Directory.Exists(CacheRoot))
+        {
+            return Task.FromResult(new CacheOverview());
+        }
+
+        var entries = new List<CacheEntrySummary>();
+        long totalBytes = 0;
+
+        foreach (var manifestPath in Directory.EnumerateFiles(CacheRoot, "manifest.json", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var cacheDirectory = Path.GetDirectoryName(manifestPath) ?? CacheRoot;
+                var unpackedDirectory = Path.Combine(cacheDirectory, "unpacked");
+                if (!Directory.Exists(unpackedDirectory))
+                {
+                    continue;
+                }
+
+                var manifest = ReadManifest(manifestPath);
+                if (manifest is null)
+                {
+                    continue;
+                }
+
+                var cacheBytes = GetDirectorySize(cacheDirectory);
+                totalBytes += cacheBytes;
+                entries.Add(new CacheEntrySummary
+                {
+                    CacheKey = manifest.CacheKey,
+                    PakPath = manifest.PakPath,
+                    ModName = manifest.ModName,
+                    WorkshopId = manifest.WorkshopId,
+                    CreatedAt = manifest.CreatedAt,
+                    PakSize = manifest.PakSize,
+                    CacheBytes = cacheBytes
+                });
+            }
+            catch
+            {
+                continue;
+            }
+        }
+
+        var recent = entries
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(Math.Max(0, maxEntries))
+            .ToList();
+
+        return Task.FromResult(new CacheOverview
+        {
+            TotalBytes = totalBytes,
+            EntryCount = entries.Count,
+            RecentEntries = recent
+        });
+    }
+
     private string GetManifestPath(string cacheKey)
     {
         return Path.Combine(GetCacheDirectory(cacheKey), "manifest.json");
+    }
+
+    private static PakManifest? ReadManifest(string manifestPath)
+    {
+        using var stream = File.OpenRead(manifestPath);
+        return JsonSerializer.Deserialize<PakManifest>(stream, JsonOptions);
+    }
+
+    private static long GetDirectorySize(string directoryPath)
+    {
+        long total = 0;
+        foreach (var file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                total += new FileInfo(file).Length;
+            }
+            catch
+            {
+                // ignore inaccessible file
+            }
+        }
+
+        return total;
     }
 }

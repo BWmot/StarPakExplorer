@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
@@ -16,6 +17,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly PakExplorerService pakExplorerService;
     private readonly IAppLogger logger;
     private readonly IAppSettingsStore settingsStore;
+    private readonly IFileStagingStore fileStagingStore;
     private readonly AppSettings appSettings;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly ObservableCollection<FileListItem> allFiles = [];
@@ -29,12 +31,18 @@ public sealed class MainViewModel : ViewModelBase
     private string previewTitle = "预览";
     private string previewText = "选择左侧文件后显示预览。";
     private BitmapSource? previewImageSource;
+    private string previewSourceText = "";
+    private string previewReadingText = "";
+    private PreviewTextMode currentPreviewTextMode = PreviewTextMode.Reading;
+    private bool previewHasFormatting;
+    private FlowDocument? previewDocument;
     private PreviewKind currentPreviewKind = PreviewKind.None;
     private double previewImageZoom = 1.0;
     private string searchKeyword = "";
     private string searchSummary = "";
     private string duplicateSummary = "";
     private string lastPakDirectory = "";
+    private string cacheSummaryText = "缓存加载中...";
     private bool isBusy;
     private bool isUpdatingExtensionFilters;
     private FileSectionTabViewModel? selectedFileSection;
@@ -44,11 +52,13 @@ public sealed class MainViewModel : ViewModelBase
         PakExplorerService pakExplorerService,
         IAppLogger logger,
         IAppSettingsStore settingsStore,
+        IFileStagingStore fileStagingStore,
         AppSettings appSettings)
     {
         this.pakExplorerService = pakExplorerService;
         this.logger = logger;
         this.settingsStore = settingsStore;
+        this.fileStagingStore = fileStagingStore;
         this.appSettings = appSettings;
 
         assetUnpackerPath = appSettings.AssetUnpackerPath;
@@ -74,13 +84,20 @@ public sealed class MainViewModel : ViewModelBase
         SelectUnpackerCommand = new AsyncRelayCommand(SelectUnpackerAsync, () => !IsBusy);
         SelectPakCommand = new AsyncRelayCommand(SelectPakAsync, () => !IsBusy);
         ClearCacheCommand = new AsyncRelayCommand(ClearCacheAsync, () => !IsBusy);
+        DeleteSelectedCacheCommand = new AsyncRelayCommand(DeleteSelectedCacheAsync, CanDeleteSelectedCacheEntries);
+        RefreshCacheOverviewCommand = new AsyncRelayCommand(RefreshCacheOverviewAsync, () => true);
         SearchCommand = new AsyncRelayCommand(SearchAsync, CanSearch);
         ScanDuplicateItemNamesCommand = new AsyncRelayCommand(ScanDuplicateItemNamesAsync, () => !IsBusy && currentManifest is not null);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
         ClearExtensionSelectionCommand = new RelayCommand(ClearExtensionSelection, CanModifyExtensions);
+        SelectAllCacheEntriesCommand = new RelayCommand(SelectAllCacheEntries, CanModifyCacheEntries);
+        ClearCacheSelectionCommand = new RelayCommand(ClearCacheSelection, CanModifyCacheEntries);
+        OpenModifyWindowCommand = new RelayCommand(OpenModifyWindow, CanOpenModifyWindow);
         ZoomOutImageCommand = new RelayCommand(() => PreviewImageZoom /= 1.25, () => IsImageLoaded);
         ResetImageZoomCommand = new RelayCommand(() => PreviewImageZoom = 1.0, () => IsImageLoaded);
         ZoomInImageCommand = new RelayCommand(() => PreviewImageZoom *= 1.25, () => IsImageLoaded);
+
+        _ = RefreshCacheOverviewAsync();
     }
 
     public ObservableCollection<FileSectionTabViewModel> FileSections { get; }
@@ -93,11 +110,17 @@ public sealed class MainViewModel : ViewModelBase
 
     public ObservableCollection<DuplicateItemNameViewModel> DuplicateItemNames { get; } = [];
 
+    public ObservableCollection<CacheEntryViewModel> RecentCacheEntries { get; } = [];
+
     public AsyncRelayCommand SelectUnpackerCommand { get; }
 
     public AsyncRelayCommand SelectPakCommand { get; }
 
     public AsyncRelayCommand ClearCacheCommand { get; }
+
+    public AsyncRelayCommand DeleteSelectedCacheCommand { get; }
+
+    public AsyncRelayCommand RefreshCacheOverviewCommand { get; }
 
     public AsyncRelayCommand SearchCommand { get; }
 
@@ -106,6 +129,12 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand SelectAllExtensionsCommand { get; }
 
     public RelayCommand ClearExtensionSelectionCommand { get; }
+
+    public RelayCommand SelectAllCacheEntriesCommand { get; }
+
+    public RelayCommand ClearCacheSelectionCommand { get; }
+
+    public RelayCommand OpenModifyWindowCommand { get; }
 
     public RelayCommand ZoomOutImageCommand { get; }
 
@@ -155,6 +184,48 @@ public sealed class MainViewModel : ViewModelBase
         set => SetProperty(ref previewText, value);
     }
 
+    public FlowDocument? PreviewDocument
+    {
+        get => previewDocument;
+        set => SetProperty(ref previewDocument, value);
+    }
+
+    public bool IsSourcePreviewMode
+    {
+        get => CurrentPreviewTextMode == PreviewTextMode.Source;
+        set
+        {
+            if (value)
+            {
+                SetPreviewTextMode(PreviewTextMode.Source);
+            }
+        }
+    }
+
+    public bool IsReadingPreviewMode
+    {
+        get => CurrentPreviewTextMode == PreviewTextMode.Reading;
+        set
+        {
+            if (value)
+            {
+                SetPreviewTextMode(PreviewTextMode.Reading);
+            }
+        }
+    }
+
+    public PreviewTextMode CurrentPreviewTextMode
+    {
+        get => currentPreviewTextMode;
+        set => SetPreviewTextMode(value);
+    }
+
+    public bool PreviewModeSwitchVisible => CurrentPreviewKind == PreviewKind.Text;
+
+    public string PreviewModeHintText => previewHasFormatting
+        ? "检测到 Starbound 颜色码"
+        : "";
+
     public BitmapSource? PreviewImageSource
     {
         get => previewImageSource;
@@ -184,6 +255,8 @@ public sealed class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(IsTextPreviewVisible));
             OnPropertyChanged(nameof(IsImagePreviewVisible));
             OnPropertyChanged(nameof(IsUnsupportedPreviewVisible));
+            OnPropertyChanged(nameof(PreviewModeSwitchVisible));
+            OnPropertyChanged(nameof(PreviewModeHintText));
         }
     }
 
@@ -194,6 +267,27 @@ public sealed class MainViewModel : ViewModelBase
     public bool IsUnsupportedPreviewVisible => CurrentPreviewKind == PreviewKind.Unsupported;
 
     public bool IsImageLoaded => PreviewImageSource is not null;
+
+    private void SetPreviewTextMode(PreviewTextMode mode)
+    {
+        if (currentPreviewTextMode == mode)
+        {
+            return;
+        }
+
+        currentPreviewTextMode = mode;
+        OnPropertyChanged(nameof(CurrentPreviewTextMode));
+        OnPropertyChanged(nameof(IsSourcePreviewMode));
+        OnPropertyChanged(nameof(IsReadingPreviewMode));
+        UpdatePreviewText();
+    }
+
+    private void UpdatePreviewText()
+    {
+        PreviewText = currentPreviewTextMode == PreviewTextMode.Source
+            ? previewSourceText
+            : previewReadingText;
+    }
 
     public double PreviewImageZoom
     {
@@ -251,6 +345,12 @@ public sealed class MainViewModel : ViewModelBase
     {
         get => duplicateSummary;
         set => SetProperty(ref duplicateSummary, value);
+    }
+
+    public string CacheSummaryText
+    {
+        get => cacheSummaryText;
+        set => SetProperty(ref cacheSummaryText, value);
     }
 
     public FileSectionTabViewModel? SelectedFileSection
@@ -364,6 +464,7 @@ public sealed class MainViewModel : ViewModelBase
         }, "加载 PAK 失败");
 
         RefreshVisibleFiles(selectFirstIfNeeded: true);
+        await RefreshCacheOverviewAsync();
     }
 
     private async Task LoadPreviewAsync(FileListItem? item)
@@ -378,10 +479,18 @@ public sealed class MainViewModel : ViewModelBase
             PreviewTitle = item.DisplayPath;
             PreviewImageSource = null;
             PreviewImageZoom = 1.0;
+            PreviewDocument = null;
 
             var preview = await pakExplorerService.GetPreviewAsync(item.File, lifetimeCancellation.Token);
             CurrentPreviewKind = preview.Kind;
-            PreviewText = preview.Content;
+            previewSourceText = preview.SourceContent;
+            previewReadingText = preview.Content;
+            previewHasFormatting = StarboundMarkup.ContainsFormatting(previewSourceText) || StarboundMarkup.ContainsFormatting(previewReadingText);
+            OnPropertyChanged(nameof(PreviewModeHintText));
+            UpdatePreviewText();
+            PreviewDocument = preview.Kind == PreviewKind.Text
+                ? PreviewDocumentBuilder.Build(previewSourceText)
+                : null;
 
             if (preview.Kind == PreviewKind.Image && preview.ImageBytes is { Length: > 0 })
             {
@@ -457,6 +566,113 @@ public sealed class MainViewModel : ViewModelBase
             await pakExplorerService.ClearCacheAsync(lifetimeCancellation.Token);
             StatusMessage = "缓存已清理";
         }, "清理缓存失败");
+
+        await RefreshCacheOverviewAsync();
+    }
+
+    private async Task DeleteSelectedCacheAsync()
+    {
+        var selectedEntries = RecentCacheEntries
+            .Where(entry => entry.IsSelected)
+            .Select(entry => entry.Summary)
+            .ToList();
+
+        if (selectedEntries.Count == 0)
+        {
+            return;
+        }
+
+        var selectedBytes = selectedEntries.Sum(entry => entry.CacheBytes);
+        var message = $"确定删除选中的 {selectedEntries.Count} 个缓存吗？\n\n总占用：{FormatBytes(selectedBytes)}";
+        var confirmed = MessageBox.Show(message, "StarPakExplorer", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            await pakExplorerService.DeleteCacheEntriesAsync(
+                selectedEntries.Select(entry => entry.CacheKey),
+                lifetimeCancellation.Token);
+
+            StatusMessage = $"已删除 {selectedEntries.Count} 个缓存";
+            if (currentManifest is not null && selectedEntries.Any(entry => entry.CacheKey == currentManifest.CacheKey))
+            {
+                ClearLoadedState();
+            }
+        }, "删除缓存失败");
+
+        await RefreshCacheOverviewAsync();
+    }
+
+    private async Task RefreshCacheOverviewAsync()
+    {
+        try
+        {
+            var overview = await pakExplorerService.GetCacheOverviewAsync(8, lifetimeCancellation.Token);
+            CacheSummaryText = $"占用 {FormatBytes(overview.TotalBytes)} · {overview.EntryCount} 个缓存";
+
+            RecentCacheEntries.Clear();
+            foreach (var entry in overview.RecentEntries)
+            {
+                RecentCacheEntries.Add(new CacheEntryViewModel(
+                    entry,
+                    () => _ = OpenRecentCacheAsync(entry),
+                    () => _ = DeleteCacheEntryAsync(entry),
+                    RaiseCommandStates));
+            }
+
+            RaiseCommandStates();
+        }
+        catch (Exception exception)
+        {
+            logger.Error("刷新缓存概览失败", exception);
+            CacheSummaryText = "缓存概览加载失败";
+            RaiseCommandStates();
+        }
+    }
+
+    private async Task OpenRecentCacheAsync(CacheEntrySummary summary)
+    {
+        if (!File.Exists(summary.PakPath))
+        {
+            ShowWarning($"找不到原始 PAK 文件：{summary.PakPath}");
+            return;
+        }
+
+        AssetUnpackerPath = appSettings.AssetUnpackerPath;
+        SelectedPakPath = summary.PakPath;
+        lastPakDirectory = Path.GetDirectoryName(summary.PakPath) ?? lastPakDirectory;
+        await SaveSettingsAsync();
+        await LoadPakAsync();
+    }
+
+    private async Task DeleteCacheEntryAsync(CacheEntrySummary summary)
+    {
+        var confirmed = MessageBox.Show(
+            $"确定删除这个缓存吗？\n\n{summary.DisplayName}\n{summary.PakPath}",
+            "StarPakExplorer",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning) == MessageBoxResult.Yes;
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            await pakExplorerService.DeleteCacheEntriesAsync([summary.CacheKey], lifetimeCancellation.Token);
+            StatusMessage = $"已删除缓存：{summary.DisplayName}";
+
+            if (currentManifest is not null && string.Equals(currentManifest.CacheKey, summary.CacheKey, StringComparison.OrdinalIgnoreCase))
+            {
+                ClearLoadedState();
+            }
+        }, "删除缓存失败");
+
+        await RefreshCacheOverviewAsync();
     }
 
     private void RebuildFilters()
@@ -572,7 +788,14 @@ public sealed class MainViewModel : ViewModelBase
             PreviewText = "当前筛选条件下没有文件。";
             PreviewImageSource = null;
             PreviewImageZoom = 1.0;
+            PreviewDocument = null;
             CurrentPreviewKind = PreviewKind.None;
+            SetPreviewTextMode(PreviewTextMode.Reading);
+            previewSourceText = "";
+            previewReadingText = "当前筛选条件下没有文件。";
+            previewHasFormatting = false;
+            OnPropertyChanged(nameof(PreviewModeHintText));
+            UpdatePreviewText();
             return;
         }
 
@@ -679,15 +902,87 @@ public sealed class MainViewModel : ViewModelBase
         return !IsBusy && ExtensionFilters.Count > 0;
     }
 
+    private bool CanModifyCacheEntries()
+    {
+        return !IsBusy && RecentCacheEntries.Count > 0;
+    }
+
+    private bool CanDeleteSelectedCacheEntries()
+    {
+        return !IsBusy && RecentCacheEntries.Any(entry => entry.IsSelected);
+    }
+
+    private bool CanOpenModifyWindow(object? parameter)
+    {
+        if (IsBusy || currentManifest is null)
+        {
+            return false;
+        }
+
+        return parameter is FileListItem || selectedFile is not null;
+    }
+
+    private void OpenModifyWindow(object? parameter)
+    {
+        var item = parameter as FileListItem ?? selectedFile;
+        if (item is null || currentManifest is null)
+        {
+            ShowWarning("请先选择一个文件");
+            return;
+        }
+
+        var window = new FileModifyWindow
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            DataContext = new FileModifyViewModel(
+                currentManifest.CacheKey,
+                item,
+                pakExplorerService,
+                fileStagingStore,
+                logger)
+        };
+
+        if (window.DataContext is FileModifyViewModel viewModel)
+        {
+            viewModel.RequestClose += result =>
+            {
+                window.DialogResult = result;
+                window.Close();
+            };
+        }
+
+        window.ShowDialog();
+    }
+
+    private void SelectAllCacheEntries()
+    {
+        foreach (var entry in RecentCacheEntries)
+        {
+            entry.IsSelected = true;
+        }
+    }
+
+    private void ClearCacheSelection()
+    {
+        foreach (var entry in RecentCacheEntries)
+        {
+            entry.IsSelected = false;
+        }
+    }
+
     private void RaiseCommandStates()
     {
         SelectUnpackerCommand.RaiseCanExecuteChanged();
         SelectPakCommand.RaiseCanExecuteChanged();
         ClearCacheCommand.RaiseCanExecuteChanged();
+        DeleteSelectedCacheCommand.RaiseCanExecuteChanged();
         SearchCommand.RaiseCanExecuteChanged();
         ScanDuplicateItemNamesCommand.RaiseCanExecuteChanged();
         SelectAllExtensionsCommand.RaiseCanExecuteChanged();
         ClearExtensionSelectionCommand.RaiseCanExecuteChanged();
+        SelectAllCacheEntriesCommand.RaiseCanExecuteChanged();
+        ClearCacheSelectionCommand.RaiseCanExecuteChanged();
+        OpenModifyWindowCommand.RaiseCanExecuteChanged();
         RaiseImageCommandStates();
     }
 
@@ -712,7 +1007,14 @@ public sealed class MainViewModel : ViewModelBase
         PreviewText = "选择左侧文件后显示预览。";
         PreviewImageSource = null;
         PreviewImageZoom = 1.0;
+        PreviewDocument = null;
         CurrentPreviewKind = PreviewKind.None;
+        SetPreviewTextMode(PreviewTextMode.Reading);
+        previewSourceText = "";
+        previewReadingText = "选择左侧文件后显示预览。";
+        previewHasFormatting = false;
+        OnPropertyChanged(nameof(PreviewModeHintText));
+        UpdatePreviewText();
         ModTitle = "加载中...";
         MetadataSummary = "";
         selectedFile = null;
@@ -736,6 +1038,21 @@ public sealed class MainViewModel : ViewModelBase
 
         parts.Add($"Files: {manifest.Files.Count}");
         return string.Join("    ", parts);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024d:0.##} KB";
+        }
+
+        return $"{bytes / 1024d / 1024d:0.##} MB";
     }
 
     private static void ShowWarning(string message)

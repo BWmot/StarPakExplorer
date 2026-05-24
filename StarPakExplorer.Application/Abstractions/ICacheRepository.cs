@@ -18,5 +18,11 @@ public interface ICacheRepository
 
     Task SaveManifestAsync(PakManifest manifest, CancellationToken cancellationToken);
 
+    Task DeleteAsync(string cacheKey, CancellationToken cancellationToken);
+
     Task ClearAsync(CancellationToken cancellationToken);
+
+    Task<CacheOverview> GetOverviewAsync(int maxEntries, CancellationToken cancellationToken);
+
+    Task<PakManifest?> TryLoadManifestByPakPathAsync(string pakPath, CancellationToken cancellationToken);
 }

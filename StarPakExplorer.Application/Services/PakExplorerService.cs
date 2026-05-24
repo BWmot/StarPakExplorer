@@ -136,16 +136,23 @@ public sealed partial class PakExplorerService
         }
 
         var text = await textFileReader.ReadTextAsync(file.FullPath, PreviewMaxBytes, cancellationToken);
-        var content = TryFormatJson(file, text.Content);
+        var sourceContent = text.Content;
+        var displayContent = TryFormatJson(file, sourceContent);
+        if (StarboundMarkup.ContainsFormatting(displayContent))
+        {
+            displayContent = StarboundMarkup.StripFormatting(displayContent);
+        }
+
         if (text.WasTruncated)
         {
-            content += "\n\n--- 文件较大，预览已截断 ---";
+            displayContent += "\n\n--- 文件较大，预览已截断 ---";
         }
 
         return new FilePreview
         {
             Title = file.RelativePath,
-            Content = content,
+            SourceContent = sourceContent,
+            Content = displayContent,
             Kind = PreviewKind.Text,
             WasTruncated = text.WasTruncated
         };
@@ -225,6 +232,32 @@ public sealed partial class PakExplorerService
     {
         logger.Info("Clearing cache");
         return cacheRepository.ClearAsync(cancellationToken);
+    }
+
+    public async Task DeleteCacheEntriesAsync(IEnumerable<string> cacheKeys, CancellationToken cancellationToken)
+    {
+        var keys = cacheKeys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (keys.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var cacheKey in keys)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await cacheRepository.DeleteAsync(cacheKey, cancellationToken);
+        }
+
+        logger.Info($"Deleted cache entries: {keys.Count}");
+    }
+
+    public Task<CacheOverview> GetCacheOverviewAsync(int maxEntries, CancellationToken cancellationToken)
+    {
+        return cacheRepository.GetOverviewAsync(maxEntries, cancellationToken);
     }
 
     private static void ValidateInput(string unpackerPath, string pakPath)

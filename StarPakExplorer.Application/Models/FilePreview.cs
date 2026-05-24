@@ -11,6 +11,7 @@ public enum PreviewKind
 public sealed class FilePreview
 {
     public string Title { get; set; } = "";
+    public string SourceContent { get; set; } = "";
     public string Content { get; set; } = "";
     public PreviewKind Kind { get; set; }
     public byte[]? ImageBytes { get; set; }
