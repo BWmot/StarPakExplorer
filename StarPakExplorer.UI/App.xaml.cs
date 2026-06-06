@@ -22,12 +22,14 @@ public partial class App : System.Windows.Application
 
         var logger = new FileAppLogger();
         var settingsStore = new JsonAppSettingsStore();
-        var cacheRepository = new CacheRepository();
         var appSettings = LoadSettings(settingsStore);
+        var cacheRepository = new CacheRepository(appSettings);
         var patchStore = new PatchStore(appSettings);
         var service = new PakExplorerService(
             new AssetUnpacker(logger),
+            new AssetPacker(logger),
             cacheRepository,
+            patchStore,
             new MetadataReader(logger),
             new FileIndexService(),
             new TextFileReader(),
@@ -35,7 +37,7 @@ public partial class App : System.Windows.Application
 
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(service, logger, settingsStore, patchStore, appSettings)
+            DataContext = new MainViewModel(service, logger, settingsStore, patchStore, cacheRepository, appSettings)
         };
         MainWindow = window;
         window.Show();

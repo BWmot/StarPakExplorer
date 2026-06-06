@@ -18,6 +18,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IAppLogger logger;
     private readonly IAppSettingsStore settingsStore;
     private readonly IPatchStore patchStore;
+    private readonly ICacheRepository cacheRepository;
     private readonly AppSettings appSettings;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly ObservableCollection<FileListItem> allFiles = [];
@@ -53,12 +54,14 @@ public sealed class MainViewModel : ViewModelBase
         IAppLogger logger,
         IAppSettingsStore settingsStore,
         IPatchStore patchStore,
+        ICacheRepository cacheRepository,
         AppSettings appSettings)
     {
         this.pakExplorerService = pakExplorerService;
         this.logger = logger;
         this.settingsStore = settingsStore;
         this.patchStore = patchStore;
+        this.cacheRepository = cacheRepository;
         this.appSettings = appSettings;
 
         assetUnpackerPath = appSettings.AssetUnpackerPath;
@@ -90,6 +93,7 @@ public sealed class MainViewModel : ViewModelBase
         ScanDuplicateItemNamesCommand = new AsyncRelayCommand(ScanDuplicateItemNamesAsync, () => !IsBusy && currentManifest is not null);
         OpenSettingsCommand = new RelayCommand(OpenSettings, () => !IsBusy);
         OpenPatchManagerCommand = new RelayCommand(OpenPatchManager, () => !IsBusy);
+        OpenPackManagerCommand = new RelayCommand(OpenPackManager, () => !IsBusy);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
         ClearExtensionSelectionCommand = new RelayCommand(ClearExtensionSelection, CanModifyExtensions);
         SelectAllCacheEntriesCommand = new RelayCommand(SelectAllCacheEntries, CanModifyCacheEntries);
@@ -131,6 +135,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand OpenSettingsCommand { get; }
 
     public RelayCommand OpenPatchManagerCommand { get; }
+
+    public RelayCommand OpenPackManagerCommand { get; }
 
     public RelayCommand SelectAllExtensionsCommand { get; }
 
@@ -633,6 +639,7 @@ public sealed class MainViewModel : ViewModelBase
                 RecentCacheEntries.Add(new CacheEntryViewModel(
                     entry,
                     () => _ = OpenRecentCacheAsync(entry),
+                    () => _ = OpenCacheFolderAsync(entry),
                     () => _ = DeleteCacheEntryAsync(entry),
                     RaiseCommandStates));
             }
@@ -687,6 +694,36 @@ public sealed class MainViewModel : ViewModelBase
         }, "删除缓存失败");
 
         await RefreshCacheOverviewAsync();
+    }
+
+    private async Task OpenCacheFolderAsync(CacheEntrySummary summary)
+    {
+        var folder = cacheRepository.GetUnpackedDirectory(summary.CacheKey);
+        if (!Directory.Exists(folder))
+        {
+            folder = cacheRepository.GetCacheDirectory(summary.CacheKey);
+        }
+
+        if (!Directory.Exists(folder))
+        {
+            ShowWarning($"找不到缓存目录：{summary.DisplayName}");
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = folder,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.Error("打开缓存目录失败", exception);
+            ShowWarning(exception.Message);
+        }
     }
 
     private void RebuildFilters()
@@ -976,6 +1013,15 @@ public sealed class MainViewModel : ViewModelBase
             DataContext = new SettingsViewModel(appSettings, settingsStore, logger)
         };
 
+        if (window.DataContext is SettingsViewModel viewModel)
+        {
+            viewModel.RequestClose += result =>
+            {
+                window.DialogResult = result;
+                window.Close();
+            };
+        }
+
         if (window.ShowDialog() == true)
         {
             ApplySettingsSnapshot();
@@ -988,8 +1034,24 @@ public sealed class MainViewModel : ViewModelBase
         var window = new PatchManagerWindow
         {
             Owner = System.Windows.Application.Current?.MainWindow,
-            DataContext = new PatchManagerViewModel(patchStore, logger, currentManifest)
+            DataContext = new PatchManagerViewModel(patchStore, pakExplorerService, logger, appSettings, currentManifest)
         };
+
+        window.ShowDialog();
+    }
+
+    private void OpenPackManager()
+    {
+        var window = new PackManagerWindow
+        {
+            Owner = System.Windows.Application.Current?.MainWindow,
+            DataContext = new PackManagerViewModel(pakExplorerService, logger, appSettings)
+        };
+
+        if (window.DataContext is PackManagerViewModel viewModel)
+        {
+            _ = viewModel.InitializeAsync();
+        }
 
         window.ShowDialog();
     }
@@ -1025,6 +1087,7 @@ public sealed class MainViewModel : ViewModelBase
         OpenModifyWindowCommand.RaiseCanExecuteChanged();
         OpenSettingsCommand.RaiseCanExecuteChanged();
         OpenPatchManagerCommand.RaiseCanExecuteChanged();
+        OpenPackManagerCommand.RaiseCanExecuteChanged();
         RaiseImageCommandStates();
     }
 

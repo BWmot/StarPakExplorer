@@ -1,0 +1,100 @@
+<Window x:Class="StarPakExplorer.UI.PackManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:StarPakExplorer.UI.ViewModels"
+        Title="封包管理"
+        Width="1180"
+        Height="780"
+        MinWidth="980"
+        MinHeight="680"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Padding="12"
+                Background="#F4F7FB"
+                CornerRadius="8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="源文件夹" VerticalAlignment="Center" FontWeight="SemiBold" />
+                <TextBox Grid.Column="1"
+                         Text="{Binding SourceDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,8,8" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Content="选择..." Margin="0,0,8,0" Command="{Binding BrowseSourceCommand}" />
+                    <Button Content="刷新树" Command="{Binding RefreshTreeCommand}" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="1" Text="导出位置" VerticalAlignment="Center" FontWeight="SemiBold" />
+                <TextBox Grid.Row="1"
+                         Grid.Column="1"
+                         Text="{Binding OutputPakPath, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,8,0" />
+                <Button Grid.Row="1"
+                        Grid.Column="2"
+                        Content="选择..."
+                        Command="{Binding BrowseOutputCommand}" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1"
+                Margin="0,12,0,12"
+                Padding="10"
+                Background="#FAFAFA"
+                BorderBrush="#E3E3E3"
+                BorderThickness="1"
+                CornerRadius="6">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="{Binding StatusMessage}" Foreground="#43546A" VerticalAlignment="Center" />
+                    <TextBlock Text="  |  " Foreground="#99A" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding SelectedFileCount, StringFormat=已勾选：{0}}" Foreground="#43546A" VerticalAlignment="Center" />
+                    <TextBlock Text="  /  " Foreground="#99A" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding TotalFileCount, StringFormat=总文件：{0}}" Foreground="#43546A" VerticalAlignment="Center" />
+                </StackPanel>
+
+                <TreeView ItemsSource="{Binding RootNodes}" HorizontalContentAlignment="Stretch">
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:PackTreeNodeViewModel}" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal">
+                                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DisplayName}" Margin="6,0,0,0" />
+                                <TextBlock Text="{Binding InfoText}" Foreground="#99A" Margin="8,0,0,0" />
+                            </StackPanel>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </DockPanel>
+        </Border>
+
+        <Border Grid.Row="2" Background="Transparent">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="全选" Width="72" Margin="0,0,8,0" Command="{Binding SelectAllCommand}" />
+                    <Button Content="全不选" Width="72" Margin="0,0,8,0" Command="{Binding ClearSelectionCommand}" />
+                    <Button Content="展开全部" Width="86" Margin="0,0,8,0" Command="{Binding ExpandAllCommand}" />
+                    <Button Content="折叠全部" Width="86" Margin="0,0,8,0" Command="{Binding CollapseAllCommand}" />
+                    <Button Content="导出封包" Width="96" Margin="0,0,8,0" Command="{Binding ExportCommand}" />
+                    <Button Content="关闭" Width="72" Click="Close_Click" />
+                </StackPanel>
+                <ProgressBar Height="4"
+                             Margin="0,10,0,0"
+                             IsIndeterminate="{Binding IsBusy}" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

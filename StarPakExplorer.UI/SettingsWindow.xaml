@@ -1,11 +1,11 @@
 <Window x:Class="StarPakExplorer.UI.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="设置"
+        Title="Settings"
         Width="760"
-        Height="360"
+        Height="520"
         MinWidth="700"
-        MinHeight="320"
+        MinHeight="380"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="14">
         <Grid.RowDefinitions>
@@ -18,6 +18,8 @@
                 CornerRadius="8">
             <Grid>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -36,11 +38,11 @@
                          Text="{Binding AssetUnpackerPath, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,8,8" />
                 <Button Grid.Column="2"
-                        Content="浏览..."
+                        Content="Browse..."
                         Command="{Binding BrowseUnpackerCommand}" />
 
                 <TextBlock Grid.Row="1"
-                           Text="PAK 默认目录"
+                           Text="Default PAK folder"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold" />
                 <TextBox Grid.Row="1"
@@ -49,25 +51,51 @@
                          Margin="0,0,8,8" />
                 <Button Grid.Row="1"
                         Grid.Column="2"
-                        Content="浏览..."
+                        Content="Browse..."
                         Command="{Binding BrowsePakDirectoryCommand}" />
 
                 <TextBlock Grid.Row="2"
-                           Text="补丁目录"
+                           Text="asset_packer.exe"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold" />
                 <TextBox Grid.Row="2"
                          Grid.Column="1"
-                         Text="{Binding PatchRootDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Text="{Binding AssetPackerPath, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,8,8" />
                 <Button Grid.Row="2"
                         Grid.Column="2"
-                        Content="浏览..."
-                        Command="{Binding BrowsePatchRootCommand}" />
+                        Content="Browse..."
+                        Command="{Binding BrowsePackerCommand}" />
 
                 <TextBlock Grid.Row="3"
+                           Text="Patch folder"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold" />
+                <TextBox Grid.Row="3"
+                         Grid.Column="1"
+                         Text="{Binding PatchRootDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,8,8" />
+                <Button Grid.Row="3"
+                        Grid.Column="2"
+                        Content="Browse..."
+                        Command="{Binding BrowsePatchRootCommand}" />
+
+                <TextBlock Grid.Row="4"
+                           Text="Cache folder"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold" />
+                <TextBox Grid.Row="4"
+                         Grid.Column="1"
+                         Text="{Binding CacheRootDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,8,8" />
+                <Button Grid.Row="4"
+                        Grid.Column="2"
+                        Content="Browse..."
+                        Command="{Binding BrowseCacheRootCommand}" />
+
+                <TextBlock Grid.Row="5"
                            Grid.ColumnSpan="3"
-                           Text="留空时会使用默认的本地应用数据目录。"
+                           Text="Leave blank to use the default LocalAppData folder."
                            Foreground="#667"
                            Margin="0,8,0,0" />
             </Grid>
@@ -79,8 +107,8 @@
                        Foreground="#43546A"
                        DockPanel.Dock="Left" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="取消" Width="88" Command="{Binding CancelCommand}" />
-                <Button Content="保存" Width="88" Command="{Binding SaveCommand}" />
+                <Button Content="Cancel" Width="88" Command="{Binding CancelCommand}" />
+                <Button Content="Save" Width="88" Command="{Binding SaveCommand}" />
             </StackPanel>
         </DockPanel>
     </Grid>

@@ -8,10 +8,11 @@ public sealed class CacheEntryViewModel : ViewModelBase
     private readonly Action selectionChanged;
     private bool isSelected;
 
-    public CacheEntryViewModel(CacheEntrySummary summary, Action onOpen, Action onDelete, Action selectionChanged)
+    public CacheEntryViewModel(CacheEntrySummary summary, Action onOpen, Action onOpenFolder, Action onDelete, Action selectionChanged)
     {
         Summary = summary;
         OpenCommand = new RelayCommand(onOpen);
+        OpenFolderCommand = new RelayCommand(onOpenFolder);
         DeleteCommand = new RelayCommand(onDelete);
         this.selectionChanged = selectionChanged;
     }
@@ -19,6 +20,8 @@ public sealed class CacheEntryViewModel : ViewModelBase
     public CacheEntrySummary Summary { get; }
 
     public RelayCommand OpenCommand { get; }
+
+    public RelayCommand OpenFolderCommand { get; }
 
     public RelayCommand DeleteCommand { get; }
 

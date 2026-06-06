@@ -20,7 +20,9 @@ public sealed partial class PakExplorerService
     };
 
     private readonly IAssetUnpacker unpacker;
+    private readonly IAssetPacker packer;
     private readonly ICacheRepository cacheRepository;
+    private readonly IPatchStore patchStore;
     private readonly IMetadataReader metadataReader;
     private readonly IFileIndexService fileIndexService;
     private readonly ITextFileReader textFileReader;
@@ -28,14 +30,18 @@ public sealed partial class PakExplorerService
 
     public PakExplorerService(
         IAssetUnpacker unpacker,
+        IAssetPacker packer,
         ICacheRepository cacheRepository,
+        IPatchStore patchStore,
         IMetadataReader metadataReader,
         IFileIndexService fileIndexService,
         ITextFileReader textFileReader,
         IAppLogger logger)
     {
         this.unpacker = unpacker;
+        this.packer = packer;
         this.cacheRepository = cacheRepository;
+        this.patchStore = patchStore;
         this.metadataReader = metadataReader;
         this.fileIndexService = fileIndexService;
         this.textFileReader = textFileReader;
@@ -258,6 +264,190 @@ public sealed partial class PakExplorerService
     public Task<CacheOverview> GetCacheOverviewAsync(int maxEntries, CancellationToken cancellationToken)
     {
         return cacheRepository.GetOverviewAsync(maxEntries, cancellationToken);
+    }
+
+    public async Task PackPatchSetAsync(
+        string patchKey,
+        string packerPath,
+        string outputPakPath,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(patchKey))
+        {
+            throw new ArgumentException("Patch key is required.", nameof(patchKey));
+        }
+
+        if (string.IsNullOrWhiteSpace(packerPath))
+        {
+            throw new FileNotFoundException("未选择 asset_packer.exe", packerPath);
+        }
+
+        var patchFiles = await patchStore.GetFilesAsync(patchKey, cancellationToken);
+        if (patchFiles.Count == 0)
+        {
+            throw new InvalidOperationException("当前补丁集没有可封包的文件。");
+        }
+
+        var stagingRoot = Path.Combine(
+            Path.GetTempPath(),
+            "StarPakExplorer",
+            "PackStaging",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            progress?.Report("正在准备封包临时目录...");
+
+            foreach (var file in patchFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var stagedPath = Path.Combine(stagingRoot, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                var stagedDirectory = Path.GetDirectoryName(stagedPath);
+                if (!string.IsNullOrWhiteSpace(stagedDirectory))
+                {
+                    Directory.CreateDirectory(stagedDirectory);
+                }
+
+                File.Copy(file.FullPath, stagedPath, overwrite: true);
+            }
+
+            if (File.Exists(outputPakPath))
+            {
+                File.Delete(outputPakPath);
+            }
+
+            progress?.Report("正在调用 asset_packer.exe...");
+            await packer.PackAsync(packerPath, stagingRoot, outputPakPath, progress, cancellationToken);
+            logger.Info($"Packed patch set: {patchKey} -> {outputPakPath}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(stagingRoot))
+                {
+                    Directory.Delete(stagingRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
+    }
+
+    public async Task PackDirectoryAsync(
+        string packerPath,
+        string sourceDirectory,
+        string outputPakPath,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var selectedFiles = Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
+            .Select(filePath => Path.GetRelativePath(sourceDirectory, filePath).Replace('\\', '/'))
+            .ToList();
+
+        await PackSelectedFilesAsync(
+            packerPath,
+            sourceDirectory,
+            selectedFiles,
+            outputPakPath,
+            progress,
+            cancellationToken);
+    }
+
+    public async Task PackSelectedFilesAsync(
+        string packerPath,
+        string sourceDirectory,
+        IEnumerable<string> relativeFilePaths,
+        string outputPakPath,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(packerPath))
+        {
+            throw new FileNotFoundException("未选择 asset_packer.exe", packerPath);
+        }
+
+        if (string.IsNullOrWhiteSpace(sourceDirectory) || !Directory.Exists(sourceDirectory))
+        {
+            throw new DirectoryNotFoundException($"找不到要封包的文件夹: {sourceDirectory}");
+        }
+
+        if (string.IsNullOrWhiteSpace(outputPakPath))
+        {
+            throw new ArgumentException("Output path is required.", nameof(outputPakPath));
+        }
+
+        var files = relativeFilePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (files.Count == 0)
+        {
+            throw new InvalidOperationException("没有可封包的文件。");
+        }
+
+        var stagingRoot = Path.Combine(
+            Path.GetTempPath(),
+            "StarPakExplorer",
+            "PackStaging",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            progress?.Report("正在准备封包临时目录...");
+            foreach (var relativePath in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var sourcePath = Path.Combine(sourceDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                var stagedPath = Path.Combine(stagingRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                var stagedDirectory = Path.GetDirectoryName(stagedPath);
+                if (!string.IsNullOrWhiteSpace(stagedDirectory))
+                {
+                    Directory.CreateDirectory(stagedDirectory);
+                }
+
+                File.Copy(sourcePath, stagedPath, overwrite: true);
+            }
+
+            if (!Directory.Exists(stagingRoot) || !Directory.EnumerateFiles(stagingRoot, "*", SearchOption.AllDirectories).Any())
+            {
+                throw new InvalidOperationException("没有找到可封包的文件。");
+            }
+
+            if (File.Exists(outputPakPath))
+            {
+                File.Delete(outputPakPath);
+            }
+
+            progress?.Report("正在调用 asset_packer.exe...");
+            await packer.PackAsync(packerPath, stagingRoot, outputPakPath, progress, cancellationToken);
+            logger.Info($"Packed directory: {sourceDirectory} -> {outputPakPath}");
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(stagingRoot))
+                {
+                    Directory.Delete(stagingRoot, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+        }
     }
 
     private static void ValidateInput(string unpackerPath, string pakPath)

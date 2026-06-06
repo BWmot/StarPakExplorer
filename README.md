@@ -5,8 +5,9 @@ Windows-only WPF desktop MVP for temporary unpacking and searching Starbound / O
 ## Features
 
 - Uses the official `asset_unpacker.exe` as the unpack backend.
+- Uses the official `asset_packer.exe` to export a patch set back into a `.pak`.
 - Caches unpacked PAKs under `%LOCALAPPDATA%\StarPakExplorer\Cache`.
-- Remembers the last selected `asset_unpacker.exe` and last PAK parent directory in `%LOCALAPPDATA%\StarPakExplorer\settings.json`.
+- Remembers the last selected `asset_unpacker.exe`, `asset_packer.exe`, and last PAK parent directory in `%LOCALAPPDATA%\StarPakExplorer\settings.json`.
 - Reads `_metadata` / `.metadata` for mod name, author, and Workshop ID.
 - Shows unpacked resource files.
 - Previews text-like Starbound assets and pretty-prints valid JSON.
@@ -14,6 +15,7 @@ Windows-only WPF desktop MVP for temporary unpacking and searching Starbound / O
 - Searches keywords across text assets and shows file, line number, and line text.
 - Scans duplicate `itemName` values inside one loaded PAK for `.item`, `.activeitem`, `.object`, and `.matitem` files.
 - Filters the file list by Starbound resource sections and by checked file extensions discovered in the current PAK.
+- Provides a separate pack manager window for selecting a folder tree, checking files, and exporting a `.pak`.
 
 ## Build
 
@@ -34,5 +36,6 @@ In the app:
 3. Select files on the left to preview text content.
 4. Use the search tab for keywords such as `extrachargebeam`.
 5. Use the duplicate tab to scan repeated `itemName` values inside the current PAK.
+6. Open `文件 -> 封包管理...` to pack any folder tree by checking files and choosing an output `.pak`.
 
 Logs are written to `%LOCALAPPDATA%\StarPakExplorer\Logs\app.log`.

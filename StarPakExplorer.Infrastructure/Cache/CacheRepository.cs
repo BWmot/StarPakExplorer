@@ -14,14 +14,14 @@ public sealed class CacheRepository : ICacheRepository
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public CacheRepository()
+    private readonly AppSettings appSettings;
+
+    public CacheRepository(AppSettings appSettings)
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        CacheRoot = Path.Combine(localAppData, "StarPakExplorer", "Cache");
-        Directory.CreateDirectory(CacheRoot);
+        this.appSettings = appSettings;
     }
 
-    public string CacheRoot { get; }
+    public string CacheRoot => ResolveCacheRoot();
 
     public string GetCacheKey(string pakPath)
     {
@@ -180,6 +180,17 @@ public sealed class CacheRepository : ICacheRepository
     private string GetManifestPath(string cacheKey)
     {
         return Path.Combine(GetCacheDirectory(cacheKey), "manifest.json");
+    }
+
+    private string ResolveCacheRoot()
+    {
+        var configuredRoot = appSettings.CacheRootDirectory;
+        var root = string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "StarPakExplorer", "Cache")
+            : configuredRoot;
+
+        Directory.CreateDirectory(root);
+        return root;
     }
 
     private static PakManifest? ReadManifest(string manifestPath)

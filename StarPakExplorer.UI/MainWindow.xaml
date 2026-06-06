@@ -15,6 +15,7 @@
         <Menu DockPanel.Dock="Top">
             <MenuItem Header="文件">
                 <MenuItem Header="选择 PAK" Command="{Binding SelectPakCommand}" />
+                <MenuItem Header="封包管理..." Command="{Binding OpenPackManagerCommand}" />
                 <Separator />
                 <MenuItem Header="退出" Click="ExitMenuItem_Click" />
             </MenuItem>
@@ -446,6 +447,7 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <CheckBox Grid.Column="0"
                                                           VerticalAlignment="Center"
@@ -467,6 +469,11 @@
                                                         VerticalAlignment="Center"
                                                         Command="{Binding OpenCommand}" />
                                                 <Button Grid.Column="4"
+                                                        Content="打开文件夹"
+                                                        Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Command="{Binding OpenFolderCommand}" />
+                                                <Button Grid.Column="5"
                                                         Content="删除"
                                                         Margin="8,0,0,0"
                                                         VerticalAlignment="Center"
