@@ -9,6 +9,7 @@ using StarPakExplorer.Application.Abstractions;
 using StarPakExplorer.Application.Models;
 using StarPakExplorer.Application.Services;
 using StarPakExplorer.UI.Commands;
+using StarPakExplorer.Infrastructure.Translation;
 
 namespace StarPakExplorer.UI.ViewModels;
 
@@ -18,6 +19,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly IAppLogger logger;
     private readonly IAppSettingsStore settingsStore;
     private readonly IPatchStore patchStore;
+    private readonly ITranslationService translationService;
     private readonly ICacheRepository cacheRepository;
     private readonly AppSettings appSettings;
     private readonly CancellationTokenSource lifetimeCancellation = new();
@@ -54,6 +56,7 @@ public sealed class MainViewModel : ViewModelBase
         IAppLogger logger,
         IAppSettingsStore settingsStore,
         IPatchStore patchStore,
+        ITranslationService translationService,
         ICacheRepository cacheRepository,
         AppSettings appSettings)
     {
@@ -61,6 +64,7 @@ public sealed class MainViewModel : ViewModelBase
         this.logger = logger;
         this.settingsStore = settingsStore;
         this.patchStore = patchStore;
+        this.translationService = translationService;
         this.cacheRepository = cacheRepository;
         this.appSettings = appSettings;
 
@@ -93,6 +97,7 @@ public sealed class MainViewModel : ViewModelBase
         ScanDuplicateItemNamesCommand = new AsyncRelayCommand(ScanDuplicateItemNamesAsync, () => !IsBusy && currentManifest is not null);
         OpenSettingsCommand = new RelayCommand(OpenSettings, () => !IsBusy);
         OpenPatchManagerCommand = new RelayCommand(OpenPatchManager, () => !IsBusy);
+        OpenTranslationManagerCommand = new RelayCommand(OpenTranslationManager, () => !IsBusy);
         OpenPackManagerCommand = new RelayCommand(OpenPackManager, () => !IsBusy);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
         ClearExtensionSelectionCommand = new RelayCommand(ClearExtensionSelection, CanModifyExtensions);
@@ -135,6 +140,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand OpenSettingsCommand { get; }
 
     public RelayCommand OpenPatchManagerCommand { get; }
+
+    public RelayCommand OpenTranslationManagerCommand { get; }
 
     public RelayCommand OpenPackManagerCommand { get; }
 
@@ -1040,6 +1047,36 @@ public sealed class MainViewModel : ViewModelBase
         window.ShowDialog();
     }
 
+    private void OpenTranslationManager()
+    {
+        if (currentManifest is null)
+        {
+            ShowWarning("请先载入一个 PAK 后再开补丁制作界面。");
+            return;
+        }
+
+        try
+        {
+            var window = new StarPakExplorer.UI.TranslationManagerWindow
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+                DataContext = new TranslationManagerViewModel(
+                    translationService,
+                    logger,
+                    appSettings,
+                    new TranslationEngineCache(),
+                    currentManifest)
+            };
+
+            window.ShowDialog();
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Open translation manager failed", exception);
+            ShowWarning(exception.Message);
+        }
+    }
+
     private void OpenPackManager()
     {
         var window = new PackManagerWindow
@@ -1087,6 +1124,7 @@ public sealed class MainViewModel : ViewModelBase
         OpenModifyWindowCommand.RaiseCanExecuteChanged();
         OpenSettingsCommand.RaiseCanExecuteChanged();
         OpenPatchManagerCommand.RaiseCanExecuteChanged();
+        OpenTranslationManagerCommand.RaiseCanExecuteChanged();
         OpenPackManagerCommand.RaiseCanExecuteChanged();
         RaiseImageCommandStates();
     }

@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using StarPakExplorer.Application.Abstractions;
+using StarPakExplorer.UI.ViewModels;
 
 namespace StarPakExplorer.UI;
 
@@ -11,9 +13,38 @@ public partial class MainWindow
     private double imagePanStartHorizontalOffset;
     private double imagePanStartVerticalOffset;
 
+    private ITranslationSourceReader? translationSourceReader;
+    private ITranslationPatchWriter? translationPatchWriter;
+    private ITranslationService? translationService;
+
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    public void SetTranslationServices(
+        ITranslationSourceReader sourceReader,
+        ITranslationPatchWriter patchWriter,
+        ITranslationService translationService)
+    {
+        translationSourceReader = sourceReader;
+        translationPatchWriter = patchWriter;
+        this.translationService = translationService;
+    }
+
+    private void OpenTranslationWindow_Click(object sender, RoutedEventArgs e)
+    {
+        if (translationSourceReader == null || translationPatchWriter == null || translationService == null)
+        {
+            System.Windows.MessageBox.Show("翻译服务未初始化。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+
+        var logger = new StarPakExplorer.Infrastructure.Logging.FileAppLogger();
+        var viewModel = new TranslationViewModel(translationSourceReader, translationPatchWriter, translationService, logger);
+        var window = new TranslationWindow(viewModel);
+        window.Owner = this;
+        window.ShowDialog();
     }
 
     private void ExitMenuItem_Click(object sender, RoutedEventArgs e)

@@ -7,4 +7,5 @@ public sealed class AppSettings
     public string PakParentDirectory { get; set; } = "";
     public string PatchRootDirectory { get; set; } = "";
     public string CacheRootDirectory { get; set; } = "";
+    public string TranslationRootDirectory { get; set; } = "";
 }

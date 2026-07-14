@@ -24,6 +24,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="180" />
@@ -94,6 +95,19 @@
                         Command="{Binding BrowseCacheRootCommand}" />
 
                 <TextBlock Grid.Row="5"
+                           Text="Translation folder"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold" />
+                <TextBox Grid.Row="5"
+                         Grid.Column="1"
+                         Text="{Binding TranslationRootDirectory, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,8,8" />
+                <Button Grid.Row="5"
+                        Grid.Column="2"
+                        Content="Browse..."
+                        Command="{Binding BrowseTranslationRootCommand}" />
+
+                <TextBlock Grid.Row="6"
                            Grid.ColumnSpan="3"
                            Text="Leave blank to use the default LocalAppData folder."
                            Foreground="#667"

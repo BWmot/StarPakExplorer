@@ -21,6 +21,9 @@
             </MenuItem>
             <MenuItem Header="编辑">
                 <MenuItem Header="补丁管理" Command="{Binding OpenPatchManagerCommand}" />
+                <MenuItem Header="批量翻译与补丁生成" Command="{Binding OpenTranslationManagerCommand}" />
+                <Separator />
+                <MenuItem Header="翻译精修工具" Click="OpenTranslationWindow_Click" />
             </MenuItem>
             <MenuItem Header="视图">
                 <MenuItem Header="刷新缓存概览" Command="{Binding RefreshCacheOverviewCommand}" />

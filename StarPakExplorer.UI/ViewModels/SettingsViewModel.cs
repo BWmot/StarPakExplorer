@@ -19,6 +19,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string pakParentDirectory = "";
     private string patchRootDirectory = "";
     private string cacheRootDirectory = "";
+    private string translationRootDirectory = "";
     private string statusMessage = "";
     private bool isSaving;
 
@@ -33,12 +34,14 @@ public sealed class SettingsViewModel : ViewModelBase
         pakParentDirectory = appSettings.PakParentDirectory;
         patchRootDirectory = appSettings.PatchRootDirectory;
         cacheRootDirectory = appSettings.CacheRootDirectory;
+        translationRootDirectory = appSettings.TranslationRootDirectory;
 
         BrowseUnpackerCommand = new RelayCommand(BrowseUnpacker);
         BrowsePackerCommand = new RelayCommand(BrowsePacker);
         BrowsePakDirectoryCommand = new RelayCommand(BrowsePakDirectory);
         BrowsePatchRootCommand = new RelayCommand(BrowsePatchRoot);
         BrowseCacheRootCommand = new RelayCommand(BrowseCacheRoot);
+        BrowseTranslationRootCommand = new RelayCommand(BrowseTranslationRoot);
         SaveCommand = new AsyncRelayCommand(SaveAsync, () => !IsBusy);
         CancelCommand = new RelayCommand(() => RequestClose?.Invoke(false));
     }
@@ -75,6 +78,12 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref cacheRootDirectory, value);
     }
 
+    public string TranslationRootDirectory
+    {
+        get => translationRootDirectory;
+        set => SetProperty(ref translationRootDirectory, value);
+    }
+
     public string StatusMessage
     {
         get => statusMessage;
@@ -102,6 +111,8 @@ public sealed class SettingsViewModel : ViewModelBase
     public RelayCommand BrowsePatchRootCommand { get; }
 
     public RelayCommand BrowseCacheRootCommand { get; }
+
+    public RelayCommand BrowseTranslationRootCommand { get; }
 
     public AsyncRelayCommand SaveCommand { get; }
 
@@ -172,6 +183,15 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    private void BrowseTranslationRoot()
+    {
+        var selected = BrowseForFolder("Select translation folder", TranslationRootDirectory);
+        if (!string.IsNullOrWhiteSpace(selected))
+        {
+            TranslationRootDirectory = selected;
+        }
+    }
+
     private async Task SaveAsync()
     {
         IsBusy = true;
@@ -182,6 +202,7 @@ public sealed class SettingsViewModel : ViewModelBase
             appSettings.PakParentDirectory = PakParentDirectory.Trim();
             appSettings.PatchRootDirectory = PatchRootDirectory.Trim();
             appSettings.CacheRootDirectory = CacheRootDirectory.Trim();
+            appSettings.TranslationRootDirectory = TranslationRootDirectory.Trim();
 
             await settingsStore.SaveAsync(appSettings, cancellationTokenSource.Token);
             StatusMessage = "Settings saved";

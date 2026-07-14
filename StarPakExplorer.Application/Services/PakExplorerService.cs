@@ -91,7 +91,9 @@ public sealed partial class PakExplorerService
             PakSize = pakFile.Length,
             PakLastWriteTimeUtc = pakFile.LastWriteTimeUtc,
             WorkshopId = workshopId,
+            ModInternalName = metadata.Name,
             ModName = metadata.GetDisplayName(workshopId, pakPath),
+            ModVersion = metadata.Version,
             Author = metadata.Author,
             Files = fileIndexService.BuildIndex(unpackedDirectory).ToList()
         };

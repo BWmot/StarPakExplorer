@@ -39,12 +39,13 @@ public sealed class MetadataReader : IMetadataReader
                 Name = ReadString(root, "name"),
                 FriendlyName = ReadString(root, "friendlyName"),
                 Author = ReadString(root, "author"),
-                SteamContentId = ReadString(root, "steamContentId") ?? workshopId
+                SteamContentId = ReadString(root, "steamContentId") ?? workshopId,
+                Version = ReadString(root, "version")
             };
         }
         catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
         {
-            logger.Error($"Failed to read metadata: {metadataPath}", exception);
+            logger.Warn($"Failed to read metadata: {metadataPath}", exception);
             return new ModMetadata { SteamContentId = workshopId };
         }
     }

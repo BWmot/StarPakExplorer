@@ -8,7 +8,9 @@ public sealed class PakManifest
     public long PakSize { get; set; }
     public DateTime PakLastWriteTimeUtc { get; set; }
     public string? WorkshopId { get; set; }
+    public string? ModInternalName { get; set; }
     public string? ModName { get; set; }
+    public string? ModVersion { get; set; }
     public string? Author { get; set; }
     public List<ResourceFileRecord> Files { get; set; } = [];
 }

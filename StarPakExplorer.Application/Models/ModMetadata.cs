@@ -6,6 +6,7 @@ public sealed class ModMetadata
     public string? FriendlyName { get; set; }
     public string? Author { get; set; }
     public string? SteamContentId { get; set; }
+    public string? Version { get; set; }
 
     public string GetDisplayName(string? workshopId, string pakPath)
     {
