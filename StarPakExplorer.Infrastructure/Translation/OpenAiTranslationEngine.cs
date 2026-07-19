@@ -1,10 +1,11 @@
 using System.Net;
+using System.Net.Security;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using StarPakExplorer.Application.Abstractions;
 using StarPakExplorer.Application.Models;
-
-#pragma warning disable SYSLIB0014 // WebRequest is obsolete – intentionally bypassing HttpClient for proxy compatibility
 
 namespace StarPakExplorer.Infrastructure.Translation;
 
@@ -35,6 +36,7 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
             model,
             temperature = 0.1,
             stream = true,
+            tool_choice = "none",
             messages = new object[]
             {
                 new { role = "system", content = BuildSystemPrompt() },
@@ -49,7 +51,7 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
             var responseText = await SendHttpRequestAsync(url, settings.OpenAi.ApiKey, jsonBody, cancellationToken)
                 .ConfigureAwait(false);
 
-            // The proxy may return SSE even with stream=false – handle both formats.
+            // Some proxies may return SSE even with stream=false – handle both formats.
             if (IsSseResponse(responseText))
             {
                 responseText = ExtractFromSseResponse(responseText);
@@ -64,6 +66,15 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
                 return ParseArrayResponse(trimmedResponse, sourceTexts.Count);
             }
 
+            // Reasoning models (DeepSeek R1/V4) may only return reasoning_content
+            // before the connection drops.  Try to find a JSON array embedded in
+            // the reasoning text (many models place the answer at the end).
+            var extractedArray = TryExtractJsonArrayFromText(responseText);
+            if (extractedArray is not null)
+            {
+                return ParseArrayResponse(extractedArray, sourceTexts.Count);
+            }
+
             if (!TryParseOpenAiJson(responseText, out var content, out var parseError))
             {
                 throw new InvalidOperationException(
@@ -76,22 +87,12 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
         {
             throw;
         }
-        catch (WebException ex)
+        catch (HttpRequestException ex)
         {
-            var errorBody = "";
-            try
-            {
-                if (ex.Response is HttpWebResponse errorResp)
-                    errorBody = await ReadStreamToEndGracefullyAsync(
-                        errorResp.GetResponseStream(), cancellationToken).ConfigureAwait(false);
-            }
-            catch { }
-
-            var statusCode = ex.Response is HttpWebResponse r ? (int)r.StatusCode : 0;
+            var inner = ex.InnerException;
+            var detail = inner?.Message ?? ex.Message;
             throw new InvalidOperationException(
-                $"API 请求失败。URL: {url}\n" +
-                (statusCode > 0 ? $"HTTP {statusCode}\n" : "") +
-                (string.IsNullOrEmpty(errorBody) ? $"网络错误: {ex.Message}" : $"服务端返回: {Truncate(errorBody, 500)}"));
+                $"API 请求失败。URL: {url}\n网络错误: {detail}");
         }
         catch (Exception ex)
         {
@@ -101,47 +102,88 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
         }
     }
 
-    // ── Raw HTTP (HttpWebRequest) ─────────────────────────────────
-    // Bypasses .NET's HttpClient Content-Length validation entirely.
-    // The local proxy (127.0.0.1:8787) closes the connection early,
-    // which HttpClient rejects as "ResponseEnded".  HttpWebRequest
-    // gives us direct stream access so we can read partial data.
+    // ── Raw HTTP (HttpClient with SSL bypass for localhost) ───────
+    // The local proxy (127.0.0.1:8787) may use a self-signed certificate
+    // and closes the connection early, which can cause "ResponseEnded".
+    // SocketsHttpHandler with ResponseHeadersRead gives us direct stream
+    // access, and we tolerate read errors (same as the old HttpWebRequest path).
+
+    private static readonly HttpClient HttpClient = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new HttpClientHandler
+        {
+            SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+            // Keep proxy auto-detection disabled for localhost.
+            UseProxy = false,
+            // Accept self-signed or invalid certs for localhost.
+            ServerCertificateCustomValidationCallback = (request, cert, chain, errors) =>
+            {
+                if (errors == SslPolicyErrors.None)
+                    return true;
+
+                var host = request?.RequestUri?.Host;
+                if (host is not null &&
+                    (host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                     host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                     host.Equals("::1", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+        };
+
+        return new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+    }
 
     private static async Task<string> SendHttpRequestAsync(
         string url, string apiKey, string jsonBody, CancellationToken ct)
     {
-        var request = (HttpWebRequest)WebRequest.Create(url);
-        request.Method = "POST";
-        request.ContentType = "application/json";
-        request.Accept = "application/json";
-        request.Headers["Authorization"] = $"Bearer {apiKey}";
-        request.Timeout = 300_000;            // 5 minutes
-        request.ReadWriteTimeout = 300_000;
-        request.KeepAlive = false;
-        request.ProtocolVersion = HttpVersion.Version11;
-        request.Proxy = null;                  // bypass system proxy detection
-        request.AllowReadStreamBuffering = false;
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+        httpRequest.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        httpRequest.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
 
-        // Write request body
-        var bodyBytes = Encoding.UTF8.GetBytes(jsonBody);
-        using (var reqStream = await request.GetRequestStreamAsync().ConfigureAwait(false))
+        // ResponseHeadersRead: start reading the stream as soon as headers
+        // arrive, without waiting for the entire body to be buffered (which
+        // is what fails with "ResponseEnded" when the proxy closes early).
+        using var response = await HttpClient.SendAsync(
+            httpRequest, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
         {
-            await reqStream.WriteAsync(bodyBytes, 0, bodyBytes.Length, ct).ConfigureAwait(false);
-        }
-
-        using var response = (HttpWebResponse)await request.GetResponseAsync().ConfigureAwait(false);
-
-        // Non-200 → read error body then throw
-        if (response.StatusCode != HttpStatusCode.OK)
-        {
-            var errBody = await ReadStreamToEndGracefullyAsync(
-                response.GetResponseStream(), ct).ConfigureAwait(false);
+            var errBody = await ReadResponseBodyGracefullyAsync(response, ct).ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"API 返回 HTTP {(int)response.StatusCode}:\n{Truncate(errBody, 500)}");
         }
 
-        return await ReadStreamToEndGracefullyAsync(
-            response.GetResponseStream(), ct).ConfigureAwait(false);
+        return await ReadResponseBodyGracefullyAsync(response, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Read response stream to string.  Tolerates IOException / HttpRequestException
+    /// (connection closed mid-stream) – returns whatever data was received before the error.
+    /// </summary>
+    private static async Task<string> ReadResponseBodyGracefullyAsync(
+        HttpResponseMessage response, CancellationToken ct)
+    {
+        Stream stream;
+        try
+        {
+            stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            return "";
+        }
+
+        return await ReadStreamToEndGracefullyAsync(stream, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -161,8 +203,11 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
         try
         {
             int read;
-            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, ct)
-                .ConfigureAwait(false)) > 0)
+#if NET
+            while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+#else
+            while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false)) > 0)
+#endif
             {
                 await ms.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
             }
@@ -170,6 +215,11 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
         catch (IOException)
         {
             // Server closed the connection mid-stream – keep what we have.
+        }
+        catch (HttpRequestException)
+        {
+            // Server closed the connection before response was complete –
+            // keep what we have (common with streaming + reasoning models).
         }
         catch (ObjectDisposedException)
         {
@@ -189,7 +239,9 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
     private static string ExtractFromSseResponse(string sseText)
     {
         var lines = sseText.Split('\n');
-        var allContent = new StringBuilder();
+        var contentBuilder = new StringBuilder();
+        var reasoningBuilder = new StringBuilder();
+        string? finalMessageContent = null;
 
         foreach (var line in lines)
         {
@@ -201,29 +253,48 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
             if (data == "[DONE]")
                 continue;
 
-            // Try extracting "message.content" or "delta.content" from JSON chunk.
             try
             {
                 using var doc = JsonDocument.Parse(data);
-                if (doc.RootElement.TryGetProperty("choices", out var choices) &&
-                    choices.ValueKind == JsonValueKind.Array &&
-                    choices.GetArrayLength() > 0)
+                if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
+                    choices.ValueKind != JsonValueKind.Array ||
+                    choices.GetArrayLength() == 0)
+                    continue;
+
+                var choice = choices[0];
+
+                // Non-streaming format mixed into SSE: message.content (final answer).
+                if (choice.TryGetProperty("message", out var msg) &&
+                    msg.TryGetProperty("content", out var msgContent) &&
+                    msgContent.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrEmpty(msgContent.GetString()))
                 {
-                    var choice = choices[0];
-                    // Non-streaming: message.content
-                    if (choice.TryGetProperty("message", out var msg) &&
-                        msg.TryGetProperty("content", out var msgContent))
-                    {
-                        allContent.Append(msgContent.GetString());
-                        continue;
-                    }
-                    // Streaming: delta.content
-                    if (choice.TryGetProperty("delta", out var delta) &&
-                        delta.TryGetProperty("content", out var deltaContent))
-                    {
-                        allContent.Append(deltaContent.GetString());
-                        continue;
-                    }
+                    finalMessageContent = msgContent.GetString();
+                    continue;
+                }
+
+                if (!choice.TryGetProperty("delta", out var delta))
+                    continue;
+
+                // Standard streaming: delta.content
+                if (delta.TryGetProperty("content", out var deltaContent) &&
+                    deltaContent.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrEmpty(deltaContent.GetString()))
+                {
+                    contentBuilder.Append(deltaContent.GetString());
+                    continue;
+                }
+
+                // Reasoning models (DeepSeek R1/V4): delta.reasoning_content.
+                // Collect as fallback — some proxies merge the final answer
+                // into reasoning_content, or the connection drops before
+                // content chunks arrive.
+                if (delta.TryGetProperty("reasoning_content", out var rc) &&
+                    rc.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrEmpty(rc.GetString()))
+                {
+                    reasoningBuilder.Append(rc.GetString());
+                    continue;
                 }
             }
             catch
@@ -232,7 +303,98 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
             }
         }
 
-        return allContent.Length > 0 ? allContent.ToString() : sseText;
+        // Priority: 1) collected delta.content  2) final message.content
+        // 3) reasoning_content fallback  4) raw SSE text (caller will report error)
+        if (contentBuilder.Length > 0)
+            return contentBuilder.ToString();
+
+        if (!string.IsNullOrEmpty(finalMessageContent))
+            return finalMessageContent;
+
+        if (reasoningBuilder.Length > 0)
+            return reasoningBuilder.ToString();
+
+        return sseText;
+    }
+
+    /// <summary>
+    /// Reasoning models (DeepSeek R1/V4) may only return reasoning_content
+    /// before the proxy closes the connection.  Try to find the final JSON
+    /// array embedded in the text – many models place the answer at the end
+    /// of their reasoning, sometimes wrapped in markdown fences.
+    /// </summary>
+    private static string? TryExtractJsonArrayFromText(string text)
+    {
+        // First, try to find JSON array inside markdown code fences at the
+        // very end of the text (common pattern for reasoning models).
+        var fenceStart = text.LastIndexOf("```json", StringComparison.Ordinal);
+        if (fenceStart >= 0)
+        {
+            var fenceEnd = text.IndexOf("```", fenceStart + 7, StringComparison.Ordinal);
+            if (fenceEnd >= 0)
+            {
+                var inside = text[(fenceStart + 7)..fenceEnd].Trim();
+                if (inside.StartsWith('['))
+                    return inside;
+            }
+        }
+
+        // Try any code fence.
+        var anyFence = text.LastIndexOf("```", StringComparison.Ordinal);
+        if (anyFence >= 0)
+        {
+            var after = text[(anyFence + 3)..].TrimStart();
+            var nl = after.IndexOf('\n');
+            if (nl >= 0)
+                after = after[(nl + 1)..];
+            var closeFence = after.LastIndexOf("```", StringComparison.Ordinal);
+            if (closeFence >= 0)
+            {
+                var inside = after[..closeFence].Trim();
+                if (inside.StartsWith('['))
+                    return inside;
+            }
+        }
+
+        // Last resort: find the last JSON array in the raw text.
+        // Walk backwards looking for "]".
+        var lastBracket = text.LastIndexOf(']');
+        if (lastBracket < 0)
+            return null;
+
+        var depth = 0;
+        var start = -1;
+        for (int i = lastBracket; i >= 0; i--)
+        {
+            if (text[i] == ']')
+                depth++;
+            else if (text[i] == '[')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    start = i;
+                    break;
+                }
+            }
+        }
+
+        if (start < 0 || start >= lastBracket)
+            return null;
+
+        var candidate = text[start..(lastBracket + 1)];
+        try
+        {
+            using var doc = JsonDocument.Parse(candidate);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                return candidate;
+        }
+        catch
+        {
+            // Not valid JSON
+        }
+
+        return null;
     }
 
     private static bool TryParseOpenAiJson(string json, out string content, out string error)
@@ -297,7 +459,8 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
     private static string BuildSystemPrompt()
     {
         return """
-You are a Starbound mod translation expert.
+You are a Starbound mod translation expert. You output translation results directly — you have NO tools, NO retrieval, NO compression. Everything you need is in the user message below.
+
 Translate the following English game text into Simplified Chinese.
 Rules:
 1. Keep gameplay terminology consistent.
@@ -311,13 +474,43 @@ Rules:
 
     private static string BuildUserPrompt(IReadOnlyList<string> sourceTexts, IReadOnlyDictionary<string, string> glossary)
     {
+        // Only include glossary entries whose keys appear as substrings in any
+        // source text.  Sending a massive glossary triggers context compression
+        // in some proxies (DeepSeek V4), which confuses the model into thinking
+        // it needs to "retrieve" compressed content.
+        var relevantGlossary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (glossary.Count <= 50)
+        {
+            relevantGlossary = new Dictionary<string, string>(glossary, StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            foreach (var (key, value) in glossary)
+            {
+                foreach (var text in sourceTexts)
+                {
+                    if (text.Contains(key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        relevantGlossary[key] = value;
+                        break;
+                    }
+                }
+
+                if (relevantGlossary.Count >= 50)
+                    break;
+            }
+        }
+
         var builder = new StringBuilder();
-        builder.AppendLine("Translate the following JSON array from English to Simplified Chinese.");
+        builder.AppendLine("The content below is NOT compressed. Translate this JSON array from English to Simplified Chinese:");
         builder.AppendLine("Return ONLY a JSON array of translated strings with the same length and order.");
         builder.AppendLine("Source array:");
         builder.AppendLine(JsonSerializer.Serialize(sourceTexts));
-        builder.AppendLine("Glossary:");
-        builder.AppendLine(JsonSerializer.Serialize(glossary));
+        if (relevantGlossary.Count > 0)
+        {
+            builder.AppendLine("Glossary:");
+            builder.AppendLine(JsonSerializer.Serialize(relevantGlossary));
+        }
         return builder.ToString();
     }
 
