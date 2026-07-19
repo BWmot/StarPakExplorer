@@ -1,3 +1,7 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using StarPakExplorer.Application.Abstractions;
 using StarPakExplorer.Application.Models;
@@ -37,10 +41,13 @@ public partial class App : System.Windows.Application
             new FileIndexService(),
             new TextFileReader(),
             logger);
+        var globalGlossaryStore = new GlobalGlossaryStore(appSettings);
+        _ = Task.Run(() => ImportTermBanksAsync(globalGlossaryStore, logger));
         var translationService = new TranslationService(
             translationProjectStore,
             new GoogleTranslationEngine(),
             new OpenAiTranslationEngine(),
+            globalGlossaryStore,
             logger);
 
         var translationSourceReader = new TranslationSourceReader();
@@ -48,7 +55,7 @@ public partial class App : System.Windows.Application
 
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(service, logger, settingsStore, patchStore, translationService, cacheRepository, appSettings)
+            DataContext = new MainViewModel(service, logger, settingsStore, patchStore, translationService, cacheRepository, appSettings, globalGlossaryStore)
         };
         window.SetTranslationServices(translationSourceReader, translationPatchWriter, translationService);
         MainWindow = window;
@@ -64,6 +71,40 @@ public partial class App : System.Windows.Application
         catch
         {
             return new AppSettings();
+        }
+    }
+
+    private static async Task ImportTermBanksAsync(IGlobalGlossaryStore store, IAppLogger logger)
+    {
+        try
+        {
+            // Look for term bank files relative to the executable and workspace
+            var baseDir = AppContext.BaseDirectory;
+            var candidates = new List<string>();
+
+            // 1. Next to the exe (published layout)
+            candidates.Add(Path.Combine(baseDir, "_ref_trans", "doc", "星界边境术语库-英中.txt"));
+
+            // 2. Development layout (bin/Debug/netX/ -> hop up to workspace root)
+            var devRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", ".."));
+            candidates.Add(Path.Combine(devRoot, "_ref_trans", "doc", "星界边境术语库-英中.txt"));
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path))
+                {
+                    var count = await store.ImportFromFileAsync(path, CancellationToken.None);
+                    if (count > 0)
+                    {
+                        logger.Info($"Imported {count} terms from term bank: {path}");
+                    }
+                    break; // Only need one successful import
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"Failed to import term banks: {ex.Message}", ex);
         }
     }
 }

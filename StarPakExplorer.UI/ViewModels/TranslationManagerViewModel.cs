@@ -75,8 +75,6 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             "StarPakTranslations",
             SanitizeFileName(ProjectTitle));
 
-        LoadEngineCache();
-
         BrowseOutputDirectoryCommand = new RelayCommand(BrowseOutputDirectory, () => !IsBusy);
         OpenOutputDirectoryCommand = new RelayCommand(OpenOutputDirectory, () => !IsBusy && Directory.Exists(OutputDirectory));
         SaveProjectCommand = new AsyncRelayCommand(SaveProjectAsync, () => !IsBusy && project is not null);
@@ -278,6 +276,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref selectedEngine, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -292,6 +291,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref openAiApiKey, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -304,6 +304,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref openAiModel, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -316,6 +317,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref openAiBaseUrl, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -328,6 +330,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref googleProjectId, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -340,6 +343,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref googleLocation, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -352,6 +356,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             if (SetProperty(ref googleServiceAccountJsonPath, value))
             {
                 SyncSettingsToProject();
+                SaveEngineCache();
             }
         }
     }
@@ -360,16 +365,47 @@ public sealed class TranslationManagerViewModel : ViewModelBase
     //  Engine cache
     // ═══════════════════════════════════════════════
 
-    private void LoadEngineCache()
+    /// <summary>
+    /// 优先使用项目已保存的引擎设置，项目无配置时回退到全局缓存。
+    /// 加载完成后将最终结果写入缓存，确保下次打开新项目时有默认值。
+    /// </summary>
+    private void LoadSettingsFromProjectOrCache()
     {
-        var cached = engineCache.Load();
-        OpenAiApiKey = cached.OpenAi.ApiKey;
-        OpenAiModel = string.IsNullOrWhiteSpace(cached.OpenAi.Model) ? "gpt-4.1-mini" : cached.OpenAi.Model;
-        OpenAiBaseUrl = string.IsNullOrWhiteSpace(cached.OpenAi.BaseUrl) ? "https://api.openai.com/v1" : cached.OpenAi.BaseUrl;
-        GoogleProjectId = cached.Google.ProjectId;
-        GoogleLocation = string.IsNullOrWhiteSpace(cached.Google.Location) ? "global" : cached.Google.Location;
-        GoogleServiceAccountJsonPath = cached.Google.ServiceAccountJsonPath;
-        SelectedEngine = cached.PreferredEngine;
+        if (project is null) return;
+
+        var ps = project.ProviderSettings;
+        bool projectHasSettings =
+            !string.IsNullOrWhiteSpace(ps.OpenAi.ApiKey)
+            || !string.IsNullOrWhiteSpace(ps.Google.ProjectId)
+            || ps.PreferredEngine != TranslationEngineType.OpenAI;
+
+        if (projectHasSettings)
+        {
+            // 项目已有配置 → 加载到 VM
+            SelectedEngine = ps.PreferredEngine;
+            OpenAiApiKey = ps.OpenAi.ApiKey;
+            OpenAiModel = string.IsNullOrWhiteSpace(ps.OpenAi.Model) ? "gpt-4.1-mini" : ps.OpenAi.Model;
+            OpenAiBaseUrl = string.IsNullOrWhiteSpace(ps.OpenAi.BaseUrl) ? "https://api.openai.com/v1" : ps.OpenAi.BaseUrl;
+            GoogleProjectId = ps.Google.ProjectId;
+            GoogleLocation = string.IsNullOrWhiteSpace(ps.Google.Location) ? "global" : ps.Google.Location;
+            GoogleServiceAccountJsonPath = ps.Google.ServiceAccountJsonPath;
+        }
+        else
+        {
+            // 项目无配置 → 从缓存加载到 VM
+            var cached = engineCache.Load();
+            OpenAiApiKey = cached.OpenAi.ApiKey;
+            OpenAiModel = string.IsNullOrWhiteSpace(cached.OpenAi.Model) ? "gpt-4.1-mini" : cached.OpenAi.Model;
+            OpenAiBaseUrl = string.IsNullOrWhiteSpace(cached.OpenAi.BaseUrl) ? "https://api.openai.com/v1" : cached.OpenAi.BaseUrl;
+            GoogleProjectId = cached.Google.ProjectId;
+            GoogleLocation = string.IsNullOrWhiteSpace(cached.Google.Location) ? "global" : cached.Google.Location;
+            GoogleServiceAccountJsonPath = cached.Google.ServiceAccountJsonPath;
+            SelectedEngine = cached.PreferredEngine;
+        }
+
+        // 同步到项目对象 + 更新缓存
+        SyncSettingsToProject();
+        SaveEngineCache();
     }
 
     private void SaveEngineCache()
@@ -548,9 +584,10 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             OutputDirectory = project.OutputDirectory;
             ProjectTitle = project.ProjectName;
 
-            SyncSettingsToProject();
+            // 优先用项目已保存的引擎配置，空时才回退到缓存
+            LoadSettingsFromProjectOrCache();
+
             PopulateFilesFromProject();
-            SaveEngineCache();
 
             StatusMessage = $"项目加载完成 —— {project.Files.Count} 个文件，"
                 + $"{project.Files.Sum(f => f.Entries.Count)} 个条目。";

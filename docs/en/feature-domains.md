@@ -76,7 +76,7 @@ Methods: `GetPatchRoot()`, `GetPatchKey()`, `EnsurePatchSetAsync()`, `SaveTextAs
 - **Location**: `%LOCALAPPDATA%\StarPakExplorer\settings.json`
 - **Store**: `IAppSettingsStore` → `JsonAppSettingsStore` (JSON serialization)
 
-**`AppSettings`** (6 string properties):
+**`AppSettings`** (7 string properties):
 
 | Property | Purpose |
 |----------|---------|
@@ -86,3 +86,79 @@ Methods: `GetPatchRoot()`, `GetPatchKey()`, `EnsurePatchSetAsync()`, `SaveTextAs
 | `PatchRootDirectory` | Custom patch storage root (default: `%LOCALAPPDATA%\StarPakExplorer\Patches`) |
 | `CacheRootDirectory` | Custom cache root (default: `%LOCALAPPDATA%\StarPakExplorer\Cache`) |
 | `TranslationRootDirectory` | Custom translation project root (default: `%LOCALAPPDATA%\StarPakExplorer\Translations`) |
+| `GlobalGlossaryPath` | Global glossary file path (default blank: uses `<install directory>\global_glossary.json`) |
+
+## Translation Pipeline & Glossary
+
+The translation system supports two workflows: standalone translation (`TranslationWindow`) and the full project pipeline (`TranslationManagerWindow`). See [translation-pipeline.md](translation-pipeline.md) for details.
+
+### Project Pipeline Overview
+
+**Four-stage flow**: Create Project → Scan → Translate → Generate
+
+1. **Create/Load**: `TranslationService.LoadOrCreateProjectAsync()` → `TranslationProgressDocument` persisted to `%LOCALAPPDATA%\StarPakExplorer\Translations\{projectKey}/`
+2. **Scan**: `TranslationService.ScanAsync()` enumerates `.item`/`.activeitem`/`.object`/`.matitem`/`.codex` files, extracts `shortdescription`, `description`, and 8 race description fields
+3. **Translate**: `TranslationService.TranslatePendingAsync()` batch-translates (30 entries per batch), supports Google Cloud Translation API v3 and OpenAI API engines
+4. **Generate**: `TranslationService.GenerateOutputAsync()` outputs `.patch` files + `_metadata`
+
+### Glossary System
+
+The translation system uses a dual-layer glossary architecture to ensure translation consistency:
+
+#### Layer 1: Project Glossary
+
+Each translation project maintains an independent project-level glossary, stored as `glossary.json` in the project directory. Project glossary entries only take effect within that project, allowing different mods to use different term mappings.
+
+#### Layer 2: Global Glossary (New)
+
+**Location**: `<install directory>\global_glossary.json` (customizable path in settings)
+
+**Interface**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/`)
+
+Core methods:
+- `LoadAllAsync()` / `SaveAllAsync()` — Load/save the global glossary
+- `UpsertAsync(key, value)` — Add or update a single entry
+- `DeleteAsync(key)` — Remove an entry
+- `ImportFromFileAsync(path)` — Import from external term bank file (supports `English|||Chinese` format)
+- `ExportToFileAsync(path)` — Export glossary to file
+- `BuildLookupAsync()` — Build a `Dictionary<string, string>` lookup table
+
+#### Glossary Merge Strategy
+
+`TranslationService.EnsureGlossaryAsync()` merges glossaries in the following priority order before each translation:
+
+1. **Project Glossary** — Highest priority
+2. **Global Glossary** — Fallback supplement
+3. **Built-in Default Glossary** — `TranslationTextTools.BuildDefaultGlossary()` provides ~40 common Starbound terms (ores: Copper/铜, Iron/铁, Gold/金, Titanium/钛, etc.; races: Floran/叶族, Hylotl/鲛人, Avian/翼族, etc.)
+
+#### Post-Translation Sync
+
+After each translation completes, `TranslationService.SyncToGlobalGlossaryAsync()` automatically upserts all project glossary entries into the global glossary, ensuring subsequent translation projects can immediately reuse them.
+
+#### Term Bank Import/Export
+
+- **Auto-import at startup**: `App.xaml.cs` attempts to import pre-built term bank files from the `_ref_trans/doc/` directory on startup
+- **Settings UI management**: `SettingsWindow` provides "Import Term Bank..." and "Export Term Bank..." buttons for manual glossary management
+- **Entry source tracking**: `TranslationGlossaryEntry.EntrySource` records origin (Imported/User/AutoFromCache), `ModifiedAt` records modification time
+
+#### Key Interfaces
+
+| Interface | Implementation | Location |
+|-----------|---------------|----------|
+| `IGlobalGlossaryStore` | `GlobalGlossaryStore` | `Infrastructure/Translation/` |
+| `ITranslationService` | `TranslationService` | `Application/Services/` |
+| `ITranslationEngine` | `GoogleTranslationEngine` | `Infrastructure/Translation/` |
+| `ITranslationEngine` | `OpenAiTranslationEngine` | `Infrastructure/Translation/` |
+| `ITranslationSourceReader` | `TranslationSourceReader` | `Infrastructure/Translation/` |
+| `ITranslationPatchWriter` | `TranslationPatchWriter` | `Infrastructure/Translation/` |
+
+#### Key Models
+
+| Model | Purpose |
+|-------|---------|
+| `TranslationProgressDocument` | Top-level project state (ProjectKey, Files, ProviderSettings, OutputDirectory) |
+| `TranslationFileState` | Per-file scan state (RelativePath, SourceFingerprint, GenerationMode, Entries) |
+| `TranslationEntryState` | Per-entry state (Path, Original, OriginalHash, Translated, Status) |
+| `TranslationGlossaryEntry` | Glossary entry (Source, Target, EntrySource, ModifiedAt, Category, Notes) |
+| `TranslationEntryStatus` | Enum: Pending=0, Translated=1, Verified=2, Skipped=3, Failed=4 |
+| `TranslationGenerationMode` | Enum: Auto=0, FileOverwrite=1, Patch=2 |

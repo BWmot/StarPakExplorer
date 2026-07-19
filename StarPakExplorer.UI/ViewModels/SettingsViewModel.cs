@@ -20,6 +20,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string patchRootDirectory = "";
     private string cacheRootDirectory = "";
     private string translationRootDirectory = "";
+    private string globalGlossaryPath = "";
     private string statusMessage = "";
     private bool isSaving;
 
@@ -35,6 +36,7 @@ public sealed class SettingsViewModel : ViewModelBase
         patchRootDirectory = appSettings.PatchRootDirectory;
         cacheRootDirectory = appSettings.CacheRootDirectory;
         translationRootDirectory = appSettings.TranslationRootDirectory;
+        globalGlossaryPath = appSettings.GlobalGlossaryPath;
 
         BrowseUnpackerCommand = new RelayCommand(BrowseUnpacker);
         BrowsePackerCommand = new RelayCommand(BrowsePacker);
@@ -42,6 +44,9 @@ public sealed class SettingsViewModel : ViewModelBase
         BrowsePatchRootCommand = new RelayCommand(BrowsePatchRoot);
         BrowseCacheRootCommand = new RelayCommand(BrowseCacheRoot);
         BrowseTranslationRootCommand = new RelayCommand(BrowseTranslationRoot);
+        BrowseGlobalGlossaryCommand = new RelayCommand(BrowseGlobalGlossary);
+        ImportTermBankCommand = new RelayCommand(ImportTermBank);
+        ExportTermBankCommand = new RelayCommand(ExportTermBank);
         SaveCommand = new AsyncRelayCommand(SaveAsync, () => !IsBusy);
         CancelCommand = new RelayCommand(() => RequestClose?.Invoke(false));
     }
@@ -84,6 +89,12 @@ public sealed class SettingsViewModel : ViewModelBase
         set => SetProperty(ref translationRootDirectory, value);
     }
 
+    public string GlobalGlossaryPath
+    {
+        get => globalGlossaryPath;
+        set => SetProperty(ref globalGlossaryPath, value);
+    }
+
     public string StatusMessage
     {
         get => statusMessage;
@@ -117,6 +128,18 @@ public sealed class SettingsViewModel : ViewModelBase
     public AsyncRelayCommand SaveCommand { get; }
 
     public RelayCommand CancelCommand { get; }
+
+    public RelayCommand BrowseGlobalGlossaryCommand { get; }
+
+    public RelayCommand ImportTermBankCommand { get; }
+
+    public RelayCommand ExportTermBankCommand { get; }
+
+    /// <summary>Called when user picks a file to import terms from. Set by the window code-behind.</summary>
+    public Action<string>? ImportTermBankAction { get; set; }
+
+    /// <summary>Called when user picks a file to export terms to. Set by the window code-behind.</summary>
+    public Action<string>? ExportTermBankAction { get; set; }
 
     private void BrowseUnpacker()
     {
@@ -192,6 +215,53 @@ public sealed class SettingsViewModel : ViewModelBase
         }
     }
 
+    private void BrowseGlobalGlossary()
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Select global glossary file",
+            Filter = "JSON Files|*.json",
+            FileName = "global_glossary.json",
+            InitialDirectory = AppContext.BaseDirectory,
+            OverwritePrompt = false
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            GlobalGlossaryPath = dialog.FileName;
+        }
+    }
+
+    private void ImportTermBank()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Select term bank file",
+            Filter = "Term Bank Files|*.txt|All Files|*.*",
+            CheckFileExists = true
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            ImportTermBankAction?.Invoke(dialog.FileName);
+        }
+    }
+
+    private void ExportTermBank()
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export term bank",
+            Filter = "Term Bank Files|*.txt",
+            FileName = "glossary_export.txt"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            ExportTermBankAction?.Invoke(dialog.FileName);
+        }
+    }
+
     private async Task SaveAsync()
     {
         IsBusy = true;
@@ -203,6 +273,7 @@ public sealed class SettingsViewModel : ViewModelBase
             appSettings.PatchRootDirectory = PatchRootDirectory.Trim();
             appSettings.CacheRootDirectory = CacheRootDirectory.Trim();
             appSettings.TranslationRootDirectory = TranslationRootDirectory.Trim();
+            appSettings.GlobalGlossaryPath = GlobalGlossaryPath.Trim();
 
             await settingsStore.SaveAsync(appSettings, cancellationTokenSource.Token);
             StatusMessage = "Settings saved";

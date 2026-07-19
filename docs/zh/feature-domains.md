@@ -76,7 +76,7 @@
 - **位置**: `%LOCALAPPDATA%\StarPakExplorer\settings.json`
 - **存储**: `IAppSettingsStore` → `JsonAppSettingsStore` (JSON 序列化)
 
-**`AppSettings`** (6 个字符串属性):
+**`AppSettings`** (7 个字符串属性):
 
 | 属性 | 用途 |
 |----------|---------|
@@ -86,3 +86,79 @@
 | `PatchRootDirectory` | 自定义补丁存储根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Patches`) |
 | `CacheRootDirectory` | 自定义缓存根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Cache`) |
 | `TranslationRootDirectory` | 自定义翻译项目根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Translations`) |
+| `GlobalGlossaryPath` | 全局术语表路径 (默认留空: 使用 `<安装目录>\global_glossary.json`) |
+
+## 翻译流水线与术语表
+
+翻译系统支持两种工作流：独立翻译（`TranslationWindow`）和完整项目流水线（`TranslationManagerWindow`）。详见 [translation-pipeline.md](translation-pipeline.md)。
+
+### 项目流水线概览
+
+**四阶段流程**: 创建项目 → 扫描 → 翻译 → 生成
+
+1. **创建/加载**: `TranslationService.LoadOrCreateProjectAsync()` → `TranslationProgressDocument` 持久化至 `%LOCALAPPDATA%\StarPakExplorer\Translations\{projectKey}/`
+2. **扫描**: `TranslationService.ScanAsync()` 枚举 `.item`/`.activeitem`/`.object`/`.matitem`/`.codex` 文件，提取 `shortdescription`、`description` 及 8 种种族描述字段
+3. **翻译**: `TranslationService.TranslatePendingAsync()` 批量翻译（每批 30 条），支持 Google Cloud Translation API v3 和 OpenAI API 两种引擎
+4. **生成**: `TranslationService.GenerateOutputAsync()` 输出 `.patch` 文件 + `_metadata`
+
+### 术语表系统
+
+翻译系统使用双层术语表架构，确保译文一致性：
+
+#### 第一层：项目术语表
+
+每个翻译项目维护独立的项目级术语表，存储在项目目录下的 `glossary.json`。项目术语表的条目仅在该项目内生效，允许不同模组使用不同的术语映射。
+
+#### 第二层：全局术语表 (新增)
+
+**位置**: `<安装目录>\global_glossary.json`（可在设置中自定义路径）
+
+**接口**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/`)
+
+核心方法:
+- `LoadAllAsync()` / `SaveAllAsync()` — 加载/保存全局术语表
+- `UpsertAsync(key, value)` — 添加或更新单个条目
+- `DeleteAsync(key)` — 删除条目
+- `ImportFromFileAsync(path)` — 从外部术语库文件导入（支持 `英文|||中文` 格式）
+- `ExportToFileAsync(path)` — 导出术语表到文件
+- `BuildLookupAsync()` — 构建 `Dictionary<string, string>` 查询表
+
+#### 术语表合并策略
+
+`TranslationService.EnsureGlossaryAsync()` 在每次翻译前按以下优先级合并术语表：
+
+1. **项目术语表** — 最高优先级
+2. **全局术语表** — 作为兜底补充
+3. **内置默认术语表** — `TranslationTextTools.BuildDefaultGlossary()` 提供约 40 个星界边境常用术语（矿物: Copper/铜、Iron/铁、Gold/金、Titanium/钛 等；种族: Floran/叶族、Hylotl/鲛人、Avian/翼族 等）
+
+#### 翻译后同步
+
+每次翻译完成后，`TranslationService.SyncToGlobalGlossaryAsync()` 自动将项目术语表中的所有条目同步（Upsert）至全局术语表，确保后续翻译项目可直接复用。
+
+#### 术语库导入导出
+
+- **启动时自动导入**: `App.xaml.cs` 在启动时尝试从 `_ref_trans/doc/` 目录导入预置的术语库文件（`星界边境术语库-英中.txt` 等）
+- **设置界面管理**: `SettingsWindow` 提供「从术语库导入...」和「导出术语库...」按钮，用户可手动管理术语表
+- **条目来源追踪**: `TranslationGlossaryEntry.EntrySource` 记录来源 (Imported/User/AutoFromCache)，`ModifiedAt` 记录修改时间
+
+#### 关键接口
+
+| 接口 | 实现 | 位置 |
+|-----------|---------------|----------|
+| `IGlobalGlossaryStore` | `GlobalGlossaryStore` | `Infrastructure/Translation/` |
+| `ITranslationService` | `TranslationService` | `Application/Services/` |
+| `ITranslationEngine` | `GoogleTranslationEngine` | `Infrastructure/Translation/` |
+| `ITranslationEngine` | `OpenAiTranslationEngine` | `Infrastructure/Translation/` |
+| `ITranslationSourceReader` | `TranslationSourceReader` | `Infrastructure/Translation/` |
+| `ITranslationPatchWriter` | `TranslationPatchWriter` | `Infrastructure/Translation/` |
+
+#### 关键模型
+
+| 模型 | 用途 |
+|-------|---------|
+| `TranslationProgressDocument` | 项目顶层状态 (ProjectKey, Files, ProviderSettings, OutputDirectory) |
+| `TranslationFileState` | 每文件扫描状态 (RelativePath, SourceFingerprint, GenerationMode, Entries) |
+| `TranslationEntryState` | 每条目状态 (Path, Original, OriginalHash, Translated, Status) |
+| `TranslationGlossaryEntry` | 术语表条目 (Source, Target, EntrySource, ModifiedAt, Category, Notes) |
+| `TranslationEntryStatus` | 枚举: Pending=0, Translated=1, Verified=2, Skipped=3, Failed=4 |
+| `TranslationGenerationMode` | 枚举: Auto=0, FileOverwrite=1, Patch=2 |

@@ -22,6 +22,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly ITranslationService translationService;
     private readonly ICacheRepository cacheRepository;
     private readonly AppSettings appSettings;
+    private readonly IGlobalGlossaryStore globalGlossaryStore;
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly ObservableCollection<FileListItem> allFiles = [];
 
@@ -58,7 +59,8 @@ public sealed class MainViewModel : ViewModelBase
         IPatchStore patchStore,
         ITranslationService translationService,
         ICacheRepository cacheRepository,
-        AppSettings appSettings)
+        AppSettings appSettings,
+        IGlobalGlossaryStore globalGlossaryStore)
     {
         this.pakExplorerService = pakExplorerService;
         this.logger = logger;
@@ -67,6 +69,7 @@ public sealed class MainViewModel : ViewModelBase
         this.translationService = translationService;
         this.cacheRepository = cacheRepository;
         this.appSettings = appSettings;
+        this.globalGlossaryStore = globalGlossaryStore;
 
         assetUnpackerPath = appSettings.AssetUnpackerPath;
         lastPakDirectory = appSettings.PakParentDirectory;
@@ -99,6 +102,7 @@ public sealed class MainViewModel : ViewModelBase
         OpenPatchManagerCommand = new RelayCommand(OpenPatchManager, () => !IsBusy);
         OpenTranslationManagerCommand = new RelayCommand(OpenTranslationManager, () => !IsBusy);
         OpenPackManagerCommand = new RelayCommand(OpenPackManager, () => !IsBusy);
+        QuickPackCommand = new AsyncRelayCommand(QuickPackAsync, () => !IsBusy);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
         ClearExtensionSelectionCommand = new RelayCommand(ClearExtensionSelection, CanModifyExtensions);
         SelectAllCacheEntriesCommand = new RelayCommand(SelectAllCacheEntries, CanModifyCacheEntries);
@@ -144,6 +148,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand OpenTranslationManagerCommand { get; }
 
     public RelayCommand OpenPackManagerCommand { get; }
+
+    public AsyncRelayCommand QuickPackCommand { get; }
 
     public RelayCommand SelectAllExtensionsCommand { get; }
 
@@ -1022,6 +1028,30 @@ public sealed class MainViewModel : ViewModelBase
 
         if (window.DataContext is SettingsViewModel viewModel)
         {
+            viewModel.ImportTermBankAction = async path =>
+            {
+                try
+                {
+                    var count = await globalGlossaryStore.ImportFromFileAsync(path, CancellationToken.None);
+                    logger.Info($"Imported {count} terms from {path}");
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn($"Import failed: {ex.Message}", ex);
+                }
+            };
+            viewModel.ExportTermBankAction = async path =>
+            {
+                try
+                {
+                    await globalGlossaryStore.ExportToFileAsync(path, CancellationToken.None);
+                    logger.Info($"Exported glossary to {path}");
+                }
+                catch (Exception ex)
+                {
+                    logger.Warn($"Export failed: {ex.Message}", ex);
+                }
+            };
             viewModel.RequestClose += result =>
             {
                 window.DialogResult = result;
@@ -1093,6 +1123,85 @@ public sealed class MainViewModel : ViewModelBase
         window.ShowDialog();
     }
 
+    private async Task QuickPackAsync()
+    {
+        // Resolve packer path
+        var packerPath = appSettings.AssetPackerPath;
+        if (string.IsNullOrWhiteSpace(packerPath) || !File.Exists(packerPath))
+        {
+            if (!string.IsNullOrWhiteSpace(appSettings.AssetUnpackerPath))
+            {
+                var derived = Path.Combine(
+                    Path.GetDirectoryName(appSettings.AssetUnpackerPath) ?? "",
+                    "asset_packer.exe");
+                if (File.Exists(derived))
+                {
+                    packerPath = derived;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(packerPath) || !File.Exists(packerPath))
+        {
+            ShowWarning("请先在设置中选择 asset_packer.exe。");
+            return;
+        }
+
+        // Select source folder
+        using var folderDialog = new System.Windows.Forms.FolderBrowserDialog
+        {
+            Description = "选择要封包的文件夹",
+            UseDescriptionForTitle = true,
+            SelectedPath = !string.IsNullOrWhiteSpace(appSettings.PakParentDirectory)
+                           && Directory.Exists(appSettings.PakParentDirectory)
+                ? appSettings.PakParentDirectory
+                : ""
+        };
+
+        if (folderDialog.ShowDialog() != System.Windows.Forms.DialogResult.OK
+            || string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
+        {
+            return;
+        }
+
+        var sourceDirectory = folderDialog.SelectedPath;
+
+        // Select output .pak file
+        var saveDialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "选择输出 .pak 文件",
+            Filter = "Starbound PAK|*.pak|All files|*.*",
+            FileName = $"{new DirectoryInfo(sourceDirectory).Name}.pak",
+            InitialDirectory = Path.GetDirectoryName(sourceDirectory) ?? sourceDirectory
+        };
+
+        if (saveDialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        var outputPakPath = saveDialog.FileName;
+
+        await RunBusyAsync(async () =>
+        {
+            StatusMessage = "正在封包...";
+            await pakExplorerService.PackDirectoryAsync(
+                packerPath,
+                sourceDirectory,
+                outputPakPath,
+                new Progress<string>(message =>
+                {
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        StatusMessage = message;
+                    }
+                }),
+                lifetimeCancellation.Token);
+
+            StatusMessage = $"封包完成: {outputPakPath}";
+        }, "快速封包失败");
+    }
+
     private void SelectAllCacheEntries()
     {
         foreach (var entry in RecentCacheEntries)
@@ -1126,6 +1235,7 @@ public sealed class MainViewModel : ViewModelBase
         OpenPatchManagerCommand.RaiseCanExecuteChanged();
         OpenTranslationManagerCommand.RaiseCanExecuteChanged();
         OpenPackManagerCommand.RaiseCanExecuteChanged();
+        QuickPackCommand.RaiseCanExecuteChanged();
         RaiseImageCommandStates();
     }
 

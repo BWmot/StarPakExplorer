@@ -16,6 +16,7 @@
             <MenuItem Header="文件">
                 <MenuItem Header="选择 PAK" Command="{Binding SelectPakCommand}" />
                 <MenuItem Header="封包管理..." Command="{Binding OpenPackManagerCommand}" />
+                <MenuItem Header="快速封包..." Command="{Binding QuickPackCommand}" />
                 <Separator />
                 <MenuItem Header="退出" Click="ExitMenuItem_Click" />
             </MenuItem>

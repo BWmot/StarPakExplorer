@@ -25,6 +25,9 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="180" />
@@ -108,6 +111,36 @@
                         Command="{Binding BrowseTranslationRootCommand}" />
 
                 <TextBlock Grid.Row="6"
+                           Text="全局术语表:"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0"/>
+                <TextBox Grid.Row="6"
+                         Grid.Column="1"
+                         Text="{Binding GlobalGlossaryPath, UpdateSourceTrigger=PropertyChanged}"
+                         VerticalAlignment="Center"/>
+                <Button Grid.Row="6"
+                        Grid.Column="2"
+                        Content="浏览..."
+                        Command="{Binding BrowseGlobalGlossaryCommand}"
+                        Padding="8,3"/>
+
+                <Button Grid.Row="7"
+                        Grid.ColumnSpan="3"
+                        Content="从术语库导入..."
+                        Command="{Binding ImportTermBankCommand}"
+                        HorizontalAlignment="Left"
+                        Padding="8,3"
+                        Margin="0,4,0,0"/>
+
+                <Button Grid.Row="8"
+                        Grid.ColumnSpan="3"
+                        Content="导出术语库..."
+                        Command="{Binding ExportTermBankCommand}"
+                        HorizontalAlignment="Left"
+                        Padding="8,3"
+                        Margin="0,4,0,0"/>
+
+                <TextBlock Grid.Row="9"
                            Grid.ColumnSpan="3"
                            Text="Leave blank to use the default LocalAppData folder."
                            Foreground="#667"

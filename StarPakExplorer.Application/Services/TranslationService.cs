@@ -10,17 +10,20 @@ public sealed class TranslationService : ITranslationService
     private readonly ITranslationProjectStore projectStore;
     private readonly ITranslationEngine googleEngine;
     private readonly ITranslationEngine openAiEngine;
+    private readonly IGlobalGlossaryStore globalGlossaryStore;
     private readonly IAppLogger logger;
 
     public TranslationService(
         ITranslationProjectStore projectStore,
         ITranslationEngine googleEngine,
         ITranslationEngine openAiEngine,
+        IGlobalGlossaryStore globalGlossaryStore,
         IAppLogger logger)
     {
         this.projectStore = projectStore;
         this.googleEngine = googleEngine;
         this.openAiEngine = openAiEngine;
+        this.globalGlossaryStore = globalGlossaryStore;
         this.logger = logger;
     }
 
@@ -245,6 +248,7 @@ public sealed class TranslationService : ITranslationService
 
         project.UpdatedAt = DateTimeOffset.Now;
         await SaveProjectAsync(project, cancellationToken).ConfigureAwait(false);
+        await SyncToGlobalGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<string> TranslateSingleAsync(
@@ -277,6 +281,8 @@ public sealed class TranslationService : ITranslationService
             translationCache[sourceText] = result;
             await projectStore.SaveTranslationsCacheAsync(project.ProjectKey, translationCache, cancellationToken).ConfigureAwait(false);
         }
+
+        await SyncToGlobalGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
 
         return result;
     }
@@ -413,12 +419,27 @@ public sealed class TranslationService : ITranslationService
 
     private async Task<Dictionary<string, string>> EnsureGlossaryAsync(string projectKey, CancellationToken cancellationToken)
     {
+        // Load project-local glossary
         var glossary = await projectStore.LoadGlossaryAsync(projectKey, cancellationToken).ConfigureAwait(false);
+
+        // Merge global glossary as fallback (project glossary overrides global)
+        var globalLookup = await globalGlossaryStore.BuildLookupAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var (key, value) in globalLookup)
+        {
+            if (!glossary.ContainsKey(key))
+            {
+                glossary[key] = value;
+            }
+        }
+
+        // If still empty, use the default (now loads from reference term banks)
         if (glossary.Count == 0)
         {
             glossary = TranslationTextTools.BuildDefaultGlossary();
-            await projectStore.SaveGlossaryAsync(projectKey, glossary, cancellationToken).ConfigureAwait(false);
         }
+
+        // Save merged glossary back to project
+        await projectStore.SaveGlossaryAsync(projectKey, glossary, cancellationToken).ConfigureAwait(false);
 
         return glossary;
     }
@@ -571,5 +592,31 @@ public sealed class TranslationService : ITranslationService
     private static string ComputeHash(string value)
     {
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+    }
+
+    private async Task SyncToGlobalGlossaryAsync(TranslationProgressDocument project, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var glossary = await projectStore.LoadGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
+            if (glossary.Count == 0) return;
+
+            var now = DateTimeOffset.Now;
+            foreach (var (source, target) in glossary)
+            {
+                if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target)) continue;
+                await globalGlossaryStore.UpsertAsync(new TranslationGlossaryEntry
+                {
+                    Source = source,
+                    Target = target,
+                    EntrySource = GlossaryEntrySource.AutoFromCache,
+                    ModifiedAt = now
+                }, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warn($"Failed to sync terms to global glossary: {ex.Message}", ex);
+        }
     }
 }

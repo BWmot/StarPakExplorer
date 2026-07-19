@@ -98,6 +98,31 @@ public interface ITranslationEngine
 | `TranslationGenerationMode` | 枚举: Auto=0, FileOverwrite=1, Patch=2 |
 | `TranslationProviderSettings` | PreferredEngine + OpenAi + Google 设置 |
 | `TranslationModMetadata` | 输出模组元数据 (Version, Author, ModName, FriendlyName, Description, Link, Priority) |
+
+## 术语表系统 (新增)
+
+翻译系统采用双层术语表架构：
+
+### 项目术语表
+
+每个翻译项目维护独立的 `glossary.json`（存储于项目目录下）。项目术语表仅在该项目内生效。
+
+### 全局术语表
+
+**存储**: `<安装目录>\global_glossary.json`（可通过 `AppSettings.GlobalGlossaryPath` 自定义）
+
+**接口**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/GlobalGlossaryStore.cs`)
+
+**合并策略** — `TranslationService.EnsureGlossaryAsync()`:
+1. 加载项目术语表（最高优先级）
+2. 合并全局术语表作为兜底（项目已有条目不被覆盖）
+3. 若仍为空，使用 `BuildDefaultGlossary()` 内置的约 40 个星界边境常用术语
+
+**自动同步**: 每次翻译完成后，`SyncToGlobalGlossaryAsync()` 自动将项目术语表条目 Upsert 至全局术语表。
+
+**术语库导入**: 启动时自动从 `_ref_trans/doc/` 导入预置术语库（`英文|||中文` 格式）。也可通过设置界面手动导入/导出。
+
+**条目追踪**: `TranslationGlossaryEntry` 记录 `EntrySource` (Imported/User/AutoFromCache)、`ModifiedAt`、`Category`、`Notes`。
 | `TranslatableEntry` | 源文件条目 (RelativePath, ItemName, FileType, SourceFields, TranslatedFields) |
 | `TranslationSourceEntry` | Path, Original, TokenStartIndex, TokenEndIndex |
 | `TranslationGlossaryEntry` | Source, Target |

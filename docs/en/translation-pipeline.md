@@ -98,6 +98,31 @@ public interface ITranslationEngine
 | `TranslationGenerationMode` | Enum: Auto=0, FileOverwrite=1, Patch=2 |
 | `TranslationProviderSettings` | PreferredEngine + OpenAi + Google settings |
 | `TranslationModMetadata` | Output mod metadata (Version, Author, ModName, FriendlyName, Description, Link, Priority) |
+
+## Glossary System (New)
+
+The translation system uses a dual-layer glossary architecture:
+
+### Project Glossary
+
+Each translation project maintains an independent `glossary.json` (stored in the project directory). Project glossary entries only take effect within that project.
+
+### Global Glossary
+
+**Storage**: `<install directory>\global_glossary.json` (customizable via `AppSettings.GlobalGlossaryPath`)
+
+**Interface**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/GlobalGlossaryStore.cs`)
+
+**Merge Strategy** — `TranslationService.EnsureGlossaryAsync()`:
+1. Load project glossary (highest priority)
+2. Merge global glossary as fallback (project entries are not overwritten)
+3. If still empty, use `BuildDefaultGlossary()` with ~40 built-in common Starbound terms
+
+**Auto Sync**: After each translation completes, `SyncToGlobalGlossaryAsync()` automatically upserts project glossary entries into the global glossary.
+
+**Term Bank Import**: On startup, automatically imports pre-built term banks from `_ref_trans/doc/` (`English|||Chinese` format). Manual import/export also available via Settings UI.
+
+**Entry Tracking**: `TranslationGlossaryEntry` records `EntrySource` (Imported/User/AutoFromCache), `ModifiedAt`, `Category`, `Notes`.
 | `TranslatableEntry` | Source file entry (RelativePath, ItemName, FileType, SourceFields, TranslatedFields) |
 | `TranslationSourceEntry` | Path, Original, TokenStartIndex, TokenEndIndex |
 | `TranslationGlossaryEntry` | Source, Target |

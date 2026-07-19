@@ -8,4 +8,7 @@ public sealed class AppSettings
     public string PatchRootDirectory { get; set; } = "";
     public string CacheRootDirectory { get; set; } = "";
     public string TranslationRootDirectory { get; set; } = "";
+
+    /// <summary>Path to the global glossary JSON file. Leave empty to use default (LocalAppData).</summary>
+    public string GlobalGlossaryPath { get; set; } = "";
 }
