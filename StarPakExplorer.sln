@@ -9,11 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StarPakExplorer.Application
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StarPakExplorer.Infrastructure", "StarPakExplorer.Infrastructure\StarPakExplorer.Infrastructure.csproj", "{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "artifacts", "artifacts", "{99116B1D-F007-E82B-443C-F02EDF2152BC}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_verify", "_verify", "{98D59F9B-9A42-3AD4-C404-35B5DB48B019}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GlossarySyncVerify", "artifacts\_verify\GlossarySyncVerify\GlossarySyncVerify.csproj", "{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -61,24 +58,10 @@ Global
 		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Release|x64.Build.0 = Release|Any CPU
 		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Release|x86.ActiveCfg = Release|Any CPU
 		{5B5774C8-BF47-4B9D-A387-8C9C65BE16D4}.Release|x86.Build.0 = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|x64.Build.0 = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Debug|x86.Build.0 = Debug|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|Any CPU.Build.0 = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|x64.ActiveCfg = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|x64.Build.0 = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|x86.ActiveCfg = Release|Any CPU
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{98D59F9B-9A42-3AD4-C404-35B5DB48B019} = {99116B1D-F007-E82B-443C-F02EDF2152BC}
-		{1BF8B8CE-CC06-4DF9-93CE-BBB55FA1BBF5} = {98D59F9B-9A42-3AD4-C404-35B5DB48B019}
 	EndGlobalSection
 EndGlobal
