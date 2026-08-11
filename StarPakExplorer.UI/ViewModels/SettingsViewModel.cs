@@ -21,6 +21,7 @@ public sealed class SettingsViewModel : ViewModelBase
     private string cacheRootDirectory = "";
     private string translationRootDirectory = "";
     private string globalGlossaryPath = "";
+    private string glossaryLanguagesText = "";
     private string statusMessage = "";
     private bool isSaving;
 
@@ -37,6 +38,7 @@ public sealed class SettingsViewModel : ViewModelBase
         cacheRootDirectory = appSettings.CacheRootDirectory;
         translationRootDirectory = appSettings.TranslationRootDirectory;
         globalGlossaryPath = appSettings.GlobalGlossaryPath;
+        glossaryLanguagesText = string.Join(", ", appSettings.GlossaryLanguages ?? new List<string>());
 
         BrowseUnpackerCommand = new RelayCommand(BrowseUnpacker);
         BrowsePackerCommand = new RelayCommand(BrowsePacker);
@@ -93,6 +95,17 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         get => globalGlossaryPath;
         set => SetProperty(ref globalGlossaryPath, value);
+    }
+
+    /// <summary>
+    /// Comma-separated list of glossary target languages (BCP-47 codes).
+    /// e.g. "zh-CN, zh-TW, ja, ko, en". Used by the glossary window to add
+    /// translations for languages other than Simplified Chinese.
+    /// </summary>
+    public string GlossaryLanguagesText
+    {
+        get => glossaryLanguagesText;
+        set => SetProperty(ref glossaryLanguagesText, value);
     }
 
     public string StatusMessage
@@ -219,9 +232,9 @@ public sealed class SettingsViewModel : ViewModelBase
     {
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Select global glossary file",
-            Filter = "JSON Files|*.json",
-            FileName = "global_glossary.json",
+            Title = "选择全局术语库文件",
+            Filter = "SQLite 数据库|*.db|旧版 JSON（将被迁移）|*.json|所有文件|*.*",
+            FileName = "global_glossary.db",
             InitialDirectory = AppContext.BaseDirectory,
             OverwritePrompt = false
         };
@@ -274,6 +287,7 @@ public sealed class SettingsViewModel : ViewModelBase
             appSettings.CacheRootDirectory = CacheRootDirectory.Trim();
             appSettings.TranslationRootDirectory = TranslationRootDirectory.Trim();
             appSettings.GlobalGlossaryPath = GlobalGlossaryPath.Trim();
+            appSettings.GlossaryLanguages = ParseLanguages(GlossaryLanguagesText);
 
             await settingsStore.SaveAsync(appSettings, cancellationTokenSource.Token);
             StatusMessage = "Settings saved";
@@ -307,5 +321,24 @@ public sealed class SettingsViewModel : ViewModelBase
         }
 
         return "";
+    }
+
+    /// <summary>
+    /// Parses a comma/whitespace separated language list into normalized
+    /// BCP-47 codes. Falls back to ["zh-CN"] when nothing valid is entered.
+    /// </summary>
+    private static List<string> ParseLanguages(string text)
+    {
+        var codes = new List<string>();
+        foreach (var part in (text ?? "").Split(new[] { ',', ';', '，', '\n', ' ' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var code = part.Trim();
+            if (!string.IsNullOrWhiteSpace(code) && !codes.Contains(code, StringComparer.OrdinalIgnoreCase))
+            {
+                codes.Add(code);
+            }
+        }
+
+        return codes.Count > 0 ? codes : new List<string> { "zh-CN" };
     }
 }

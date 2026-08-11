@@ -28,6 +28,7 @@ public sealed class TranslationViewModel : ViewModelBase
     private System.ComponentModel.ICollectionView? entriesView;
 
     // ── Engine configuration ──
+    private string targetLanguage = "zh-CN";
     private string openAiApiKey = "";
     private string openAiModel = "gpt-4.1-mini";
     private string openAiBaseUrl = "https://api.openai.com/v1";
@@ -139,10 +140,34 @@ public sealed class TranslationViewModel : ViewModelBase
 
     public IEnumerable<TranslationEngineType> EngineOptions => Enum.GetValues<TranslationEngineType>();
 
+    /// <summary>是否显示 Google Cloud（付费）配置面板——仅当选中 Google 引擎时。</summary>
+    public bool IsGooglePaidConfigVisible => SelectedEngine == TranslationEngineType.Google;
+
+    /// <summary>是否显示 Google 免费引擎提示——仅当选中 GoogleFree 引擎时。</summary>
+    public bool IsGoogleFreeNoteVisible => SelectedEngine == TranslationEngineType.GoogleFree;
+
     public TranslationEngineType SelectedEngine
     {
         get => selectedEngine;
-        set => SetProperty(ref selectedEngine, value);
+        set
+        {
+            if (SetProperty(ref selectedEngine, value))
+            {
+                OnPropertyChanged(nameof(IsGooglePaidConfigVisible));
+                OnPropertyChanged(nameof(IsGoogleFreeNoteVisible));
+            }
+        }
+    }
+
+    /// <summary>可选的目标语言（BCP-47），用于 ComboBox 快捷选择，也可手动输入。</summary>
+    public IReadOnlyList<string> TargetLanguageOptions { get; } =
+        new[] { "zh-CN", "zh-TW", "ja", "ko", "en", "de", "fr", "es", "ru" };
+
+    /// <summary>目标语言（BCP-47），例如 zh-CN / zh-TW / ja / ko。</summary>
+    public string TargetLanguage
+    {
+        get => targetLanguage;
+        set => SetProperty(ref targetLanguage, value);
     }
 
     public string OpenAiApiKey
@@ -445,6 +470,7 @@ public sealed class TranslationViewModel : ViewModelBase
             ProviderSettings = new TranslationProviderSettings
             {
                 PreferredEngine = SelectedEngine,
+                TargetLanguage = TargetLanguage,
                 OpenAi = new OpenAiTranslationSettings
                 {
                     ApiKey = OpenAiApiKey,
@@ -472,6 +498,7 @@ public sealed class TranslationViewModel : ViewModelBase
         }
 
         apiProject.ProviderSettings.PreferredEngine = SelectedEngine;
+        apiProject.ProviderSettings.TargetLanguage = TargetLanguage;
         apiProject.ProviderSettings.OpenAi.ApiKey = OpenAiApiKey;
         apiProject.ProviderSettings.OpenAi.Model = OpenAiModel;
         apiProject.ProviderSettings.OpenAi.BaseUrl = OpenAiBaseUrl;

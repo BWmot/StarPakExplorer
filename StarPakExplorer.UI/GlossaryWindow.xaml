@@ -1,0 +1,150 @@
+<Window x:Class="StarPakExplorer.UI.GlossaryWindow"
+        x:Name="GlossaryRoot"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="术语库管理"
+        Width="1180"
+        Height="720"
+        MinWidth="900"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <DockPanel Margin="14">
+        <Border DockPanel.Dock="Top"
+                Padding="12"
+                Background="#F4F7FB"
+                CornerRadius="8">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="搜索:"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Margin="0,0,8,0" />
+                <TextBox Grid.Column="1"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="按原文 / 译文 / 类别 / 备注搜索"
+                         Margin="0,0,8,0" />
+                <Button Grid.Column="2"
+                        Content="搜索"
+                        Command="{Binding SearchCommand}"
+                        Margin="0,0,8,0" />
+                <TextBlock Grid.Column="3"
+                           Text="语言:"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Margin="0,0,6,0" />
+                <ComboBox Grid.Column="4"
+                          ItemsSource="{Binding LanguageFilterOptions}"
+                          SelectedItem="{Binding SelectedLanguage}"
+                          Width="110"
+                          Margin="0,0,8,0"
+                          ToolTip="按目标语言筛选；也可在“设置”中添加更多语言" />
+                <Button Grid.Column="5"
+                        Content="新增"
+                        Command="{Binding AddCommand}"
+                        Margin="0,0,8,0" />
+                <Button Grid.Column="6"
+                        Content="保存全部"
+                        Command="{Binding SaveAllCommand}"
+                        Margin="0,0,8,0" />
+                <Button Grid.Column="7"
+                        Content="删除选中"
+                        Command="{Binding DeleteSelectedCommand}"
+                        Margin="0,0,8,0" />
+                <Button Grid.Column="8"
+                        Content="导入..."
+                        Command="{Binding ImportCommand}"
+                        Margin="0,0,8,0" />
+                <Button Grid.Column="9"
+                        Content="导出..."
+                        Command="{Binding ExportCommand}" />
+
+                <StackPanel Grid.Row="1"
+                            Grid.ColumnSpan="10"
+                            Orientation="Horizontal"
+                            Margin="0,10,0,0">
+                    <ProgressBar Width="180"
+                                 Height="6"
+                                 IsIndeterminate="{Binding IsBusy}"
+                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}"
+                                 Margin="0,0,12,0" />
+                    <Button Content="删除全部筛选结果"
+                            Command="{Binding DeleteAllFilteredCommand}"
+                            Padding="8,2" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                Padding="6,10,6,0">
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="#43546A"
+                       TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <Border Margin="0,12,0,0"
+                Padding="8"
+                Background="#FAFAFA"
+                BorderBrush="#E3E3E3"
+                BorderThickness="1"
+                CornerRadius="6">
+            <DataGrid x:Name="GlossaryGrid"
+                      ItemsSource="{Binding Entries}"
+                      SelectedItem="{Binding SelectedEntry}"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      CanUserResizeRows="False"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      RowHeight="26"
+                      CellEditEnding="GlossaryGrid_CellEditEnding">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="原文"
+                                        Binding="{Binding Source, UpdateSourceTrigger=LostFocus}"
+                                        Width="2*" />
+                    <DataGridTextColumn Header="译文"
+                                        Binding="{Binding Target, UpdateSourceTrigger=LostFocus}"
+                                        Width="2*" />
+                    <DataGridComboBoxColumn Header="语言"
+                                            SelectedItemBinding="{Binding Language, UpdateSourceTrigger=LostFocus}"
+                                            ItemsSource="{Binding DataContext.LanguageChoices, ElementName=GlossaryRoot}"
+                                            Width="110" />
+                    <DataGridTextColumn Header="类别"
+                                        Binding="{Binding Category, UpdateSourceTrigger=LostFocus}"
+                                        Width="1*" />
+                    <DataGridComboBoxColumn Header="来源"
+                                            SelectedItemBinding="{Binding EntrySource}"
+                                            ItemsSource="{Binding DataContext.SourceOptions, ElementName=GlossaryRoot}"
+                                            Width="90" />
+                    <DataGridTextColumn Header="备注"
+                                        Binding="{Binding Notes, UpdateSourceTrigger=LostFocus}"
+                                        Width="2*" />
+                    <DataGridTextColumn Header="修改时间"
+                                        Binding="{Binding ModifiedAtText}"
+                                        Width="130"
+                                        IsReadOnly="True" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </DockPanel>
+</Window>

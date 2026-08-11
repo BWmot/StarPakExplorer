@@ -1,40 +1,16 @@
-using System.Text.Json;
 using StarPakExplorer.Application.Abstractions;
 using StarPakExplorer.Application.Models;
+using StarPakExplorer.Application.Services;
 
 namespace StarPakExplorer.Infrastructure.Translation;
 
+/// <summary>
+/// 从解包后的 Mod 目录中读取所有可翻译条目。
+/// 扩展名白名单与字段提取逻辑统一委托给 <see cref="TranslationTextTools"/>，
+/// 与翻译管理器的判定保持一致（含 dialog/.npctype/.questtemplate/interface/.species 等类别）。
+/// </summary>
 public sealed class TranslationSourceReader : ITranslationSourceReader
 {
-    private static readonly HashSet<string> TranslatableExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".item",
-        ".activeitem",
-        ".object",
-        ".matitem",
-        ".codex"
-    };
-
-    private static readonly HashSet<string> TranslatableFields = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "shortdescription",
-        "description",
-        "apexDescription",
-        "avianDescription",
-        "floranDescription",
-        "glitchDescription",
-        "humanDescription",
-        "hylotlDescription",
-        "novakidDescription",
-        "feneroxDescription"
-    };
-
-    private static readonly JsonDocumentOptions JsonOptions = new()
-    {
-        CommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
-
     public Task<IReadOnlyList<TranslatableEntry>> ReadEntriesAsync(
         string unpackedModPath,
         CancellationToken cancellationToken = default)
@@ -56,8 +32,7 @@ public sealed class TranslationSourceReader : ITranslationSourceReader
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var extension = Path.GetExtension(filePath);
-            if (!TranslatableExtensions.Contains(extension))
+            if (!TranslationTextTools.IsTranslatableCandidate(filePath))
             {
                 continue;
             }
@@ -80,66 +55,33 @@ public sealed class TranslationSourceReader : ITranslationSourceReader
         try
         {
             var jsonText = File.ReadAllText(filePath);
+            var fileType = Path.GetExtension(filePath);
 
-            using var doc = JsonDocument.Parse(jsonText, JsonOptions);
-            var root = doc.RootElement;
+            var itemName = TranslationTextTools.GetItemName(jsonText, Path.GetFileNameWithoutExtension(filePath));
 
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return null;
-            }
+            var sourceFields = TranslationTextTools.ExtractTranslatableFields(jsonText, fileType);
 
-            // Extract itemName or objectName
-            var itemName = GetStringProperty(root, "itemName")
-                        ?? GetStringProperty(root, "objectName")
-                        ?? Path.GetFileNameWithoutExtension(filePath);
-
-            // Extract translatable fields
-            var sourceFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var fieldName in TranslatableFields)
-            {
-                if (root.TryGetProperty(fieldName, out var prop) && prop.ValueKind == JsonValueKind.String)
-                {
-                    var value = prop.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        sourceFields[fieldName] = value;
-                    }
-                }
-            }
-
-            // Skip files with no translatable fields
+            // 跳过没有任何可翻译字段的文件。
             if (sourceFields.Count == 0)
             {
                 return null;
             }
 
             var relativePath = Path.GetRelativePath(rootPath, filePath).Replace('\\', '/');
-            var fileType = Path.GetExtension(filePath).ToLowerInvariant();
 
             return new TranslatableEntry
             {
                 RelativePath = relativePath,
                 ItemName = itemName,
-                FileType = fileType,
+                FileType = fileType.ToLowerInvariant(),
                 SourceFields = sourceFields,
                 TranslatedFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             };
         }
         catch (Exception)
         {
-            // Skip files that can't be parsed
+            // 跳过无法解析的文件。
             return null;
         }
-    }
-
-    private static string? GetStringProperty(JsonElement element, string propertyName)
-    {
-        if (element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
-        {
-            return prop.GetString();
-        }
-
-        return null;
     }
 }

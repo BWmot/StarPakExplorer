@@ -31,6 +31,15 @@ public interface ITranslationService
         IProgress<string>? progress,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// 从输出目录中已存在的补丁（.patch）或整文件覆盖结果中导入已有翻译，
+    /// 自动回填到项目里尚未翻译的条目。返回回填的条目数。
+    /// </summary>
+    Task<int> ImportExistingTranslationsAsync(
+        TranslationProgressDocument project,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken);
+
     Task<string> GenerateSingleEntryPatchAsync(
         TranslationProgressDocument project,
         TranslationFileState file,

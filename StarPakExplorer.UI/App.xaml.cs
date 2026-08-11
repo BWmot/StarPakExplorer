@@ -41,12 +41,13 @@ public partial class App : System.Windows.Application
             new FileIndexService(),
             new TextFileReader(),
             logger);
-        var globalGlossaryStore = new GlobalGlossaryStore(appSettings);
+        var globalGlossaryStore = new SqliteGlobalGlossaryStore(appSettings);
         _ = Task.Run(() => ImportTermBanksAsync(globalGlossaryStore, logger));
         var translationService = new TranslationService(
             translationProjectStore,
             new GoogleTranslationEngine(),
             new OpenAiTranslationEngine(),
+            new GoogleFreeTranslationEngine(),
             globalGlossaryStore,
             logger);
 
@@ -93,7 +94,7 @@ public partial class App : System.Windows.Application
             {
                 if (File.Exists(path))
                 {
-                    var count = await store.ImportFromFileAsync(path, CancellationToken.None);
+                    var count = await store.ImportFromFileAsync(path, "zh-CN", CancellationToken.None);
                     if (count > 0)
                     {
                         logger.Info($"Imported {count} terms from term bank: {path}");

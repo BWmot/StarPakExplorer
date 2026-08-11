@@ -39,8 +39,8 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
             tool_choice = "none",
             messages = new object[]
             {
-                new { role = "system", content = BuildSystemPrompt() },
-                new { role = "user",   content = BuildUserPrompt(sourceTexts, glossary) }
+                new { role = "system", content = BuildSystemPrompt(settings.TargetLanguage) },
+                new { role = "user",   content = BuildUserPrompt(sourceTexts, glossary, settings.TargetLanguage) }
             }
         };
 
@@ -456,12 +456,12 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
         }
     }
 
-    private static string BuildSystemPrompt()
+    private static string BuildSystemPrompt(string targetLanguage)
     {
-        return """
+        return $"""
 You are a Starbound mod translation expert. You output translation results directly — you have NO tools, NO retrieval, NO compression. Everything you need is in the user message below.
 
-Translate the following English game text into Simplified Chinese.
+Translate the following English game text into {targetLanguage} ({DescribeLanguage(targetLanguage)}).
 Rules:
 1. Keep gameplay terminology consistent.
 2. Keep item names short and punchy.
@@ -472,7 +472,7 @@ Rules:
 """;
     }
 
-    private static string BuildUserPrompt(IReadOnlyList<string> sourceTexts, IReadOnlyDictionary<string, string> glossary)
+    private static string BuildUserPrompt(IReadOnlyList<string> sourceTexts, IReadOnlyDictionary<string, string> glossary, string targetLanguage)
     {
         // Only include glossary entries whose keys appear as substrings in any
         // source text.  Sending a massive glossary triggers context compression
@@ -481,7 +481,11 @@ Rules:
         var relevantGlossary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (glossary.Count <= 50)
         {
-            relevantGlossary = new Dictionary<string, string>(glossary, StringComparer.OrdinalIgnoreCase);
+            // 大小写不敏感去重，避免 "apex"/"Apex" 等仅大小写不同的重复源词导致异常。
+            foreach (var (key, value) in glossary)
+            {
+                relevantGlossary.TryAdd(key, value);
+            }
         }
         else
         {
@@ -502,7 +506,7 @@ Rules:
         }
 
         var builder = new StringBuilder();
-        builder.AppendLine("The content below is NOT compressed. Translate this JSON array from English to Simplified Chinese:");
+        builder.AppendLine($"The content below is NOT compressed. Translate this JSON array from English to {targetLanguage} ({DescribeLanguage(targetLanguage)}):");
         builder.AppendLine("Return ONLY a JSON array of translated strings with the same length and order.");
         builder.AppendLine("Source array:");
         builder.AppendLine(JsonSerializer.Serialize(sourceTexts));
@@ -512,6 +516,30 @@ Rules:
             builder.AppendLine(JsonSerializer.Serialize(relevantGlossary));
         }
         return builder.ToString();
+    }
+
+    /// <summary>把 BCP-47 语言代码转成人类可读的语言名，便于 LLM 理解目标语言。</summary>
+    private static string DescribeLanguage(string languageCode)
+    {
+        var code = languageCode.Trim();
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return "Simplified Chinese";
+        }
+
+        return code.ToLowerInvariant() switch
+        {
+            "zh" or "zh-cn" or "zh-hans" => "Simplified Chinese",
+            "zh-tw" or "zh-hk" or "zh-hant" => "Traditional Chinese",
+            "ja" => "Japanese",
+            "ko" => "Korean",
+            "en" => "English",
+            "de" => "German",
+            "fr" => "French",
+            "es" => "Spanish",
+            "ru" => "Russian",
+            _ => code
+        };
     }
 
     private static IReadOnlyList<string> ParseArrayResponse(string content, int expectedCount)

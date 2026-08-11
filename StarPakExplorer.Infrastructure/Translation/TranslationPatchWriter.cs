@@ -10,7 +10,10 @@ public sealed class TranslationPatchWriter : ITranslationPatchWriter
     private static readonly JsonSerializerOptions PatchJsonOptions = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        WriteIndented = false
+        WriteIndented = false,
+        // Starbound 的 .patch 要求键全部小写：op / path / value。
+        // 之前缺此行导致输出 "Op"/"Path"/"Value"，游戏报 JsonException: No such key in Json::get("op")。
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     private static readonly JsonSerializerOptions MetadataJsonOptions = new()

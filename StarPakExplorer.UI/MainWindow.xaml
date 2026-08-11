@@ -23,6 +23,7 @@
             <MenuItem Header="编辑">
                 <MenuItem Header="补丁管理" Command="{Binding OpenPatchManagerCommand}" />
                 <MenuItem Header="批量翻译与补丁生成" Command="{Binding OpenTranslationManagerCommand}" />
+                <MenuItem Header="术语库管理..." Command="{Binding OpenGlossaryCommand}" />
                 <Separator />
                 <MenuItem Header="翻译精修工具" Click="OpenTranslationWindow_Click" />
             </MenuItem>

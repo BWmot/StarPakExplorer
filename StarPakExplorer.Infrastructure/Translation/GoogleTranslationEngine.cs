@@ -39,7 +39,7 @@ public sealed class GoogleTranslationEngine : ITranslationEngine
             ["contents"] = sourceTexts,
             ["mimeType"] = "text/plain",
             ["sourceLanguageCode"] = "en",
-            ["targetLanguageCode"] = "zh-CN"
+            ["targetLanguageCode"] = settings.TargetLanguage
         };
 
         if (!string.IsNullOrWhiteSpace(google.GlossaryName))

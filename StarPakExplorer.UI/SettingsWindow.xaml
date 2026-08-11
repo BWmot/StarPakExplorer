@@ -28,6 +28,7 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="180" />
@@ -124,7 +125,23 @@
                         Command="{Binding BrowseGlobalGlossaryCommand}"
                         Padding="8,3"/>
 
-                <Button Grid.Row="7"
+                <TextBlock Grid.Row="7"
+                           Text="术语库目标语言:"
+                           VerticalAlignment="Center"
+                           Margin="0,4,10,0"/>
+                <TextBox Grid.Row="7"
+                         Grid.Column="1"
+                         Text="{Binding GlossaryLanguagesText, UpdateSourceTrigger=PropertyChanged}"
+                         VerticalAlignment="Center"
+                         Margin="0,4,8,0"
+                         ToolTip="逗号分隔的 BCP-47 语言代码，如：zh-CN, zh-TW, ja, ko, en" />
+                <TextBlock Grid.Row="7"
+                           Grid.Column="2"
+                           Text="如: zh-CN, zh-TW, ja, ko, en"
+                           VerticalAlignment="Center"
+                           Foreground="#667" />
+
+                <Button Grid.Row="8"
                         Grid.ColumnSpan="3"
                         Content="从术语库导入..."
                         Command="{Binding ImportTermBankCommand}"
@@ -132,7 +149,7 @@
                         Padding="8,3"
                         Margin="0,4,0,0"/>
 
-                <Button Grid.Row="8"
+                <Button Grid.Row="9"
                         Grid.ColumnSpan="3"
                         Content="导出术语库..."
                         Command="{Binding ExportTermBankCommand}"
@@ -140,10 +157,11 @@
                         Padding="8,3"
                         Margin="0,4,0,0"/>
 
-                <TextBlock Grid.Row="9"
+                <TextBlock Grid.Row="10"
                            Grid.ColumnSpan="3"
-                           Text="Leave blank to use the default LocalAppData folder."
+                           Text="留空则使用默认目录下的 global_glossary.db。选择旧版 .json 文件会自动迁移为 SQLite。术语库目标语言决定术语表可以添加哪些语言的译文。"
                            Foreground="#667"
+                           TextWrapping="Wrap"
                            Margin="0,8,0,0" />
             </Grid>
         </Border>

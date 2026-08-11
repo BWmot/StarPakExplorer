@@ -1,3 +1,4 @@
+using System.Text.Json;
 using StarPakExplorer.Application.Abstractions;
 using StarPakExplorer.Application.Models;
 
@@ -10,6 +11,7 @@ public sealed class TranslationService : ITranslationService
     private readonly ITranslationProjectStore projectStore;
     private readonly ITranslationEngine googleEngine;
     private readonly ITranslationEngine openAiEngine;
+    private readonly ITranslationEngine googleFreeEngine;
     private readonly IGlobalGlossaryStore globalGlossaryStore;
     private readonly IAppLogger logger;
 
@@ -17,12 +19,14 @@ public sealed class TranslationService : ITranslationService
         ITranslationProjectStore projectStore,
         ITranslationEngine googleEngine,
         ITranslationEngine openAiEngine,
+        ITranslationEngine googleFreeEngine,
         IGlobalGlossaryStore globalGlossaryStore,
         IAppLogger logger)
     {
         this.projectStore = projectStore;
         this.googleEngine = googleEngine;
         this.openAiEngine = openAiEngine;
+        this.googleFreeEngine = googleFreeEngine;
         this.globalGlossaryStore = globalGlossaryStore;
         this.logger = logger;
     }
@@ -62,7 +66,7 @@ public sealed class TranslationService : ITranslationService
                 existing.ProviderSettings.Google = new GoogleTranslationSettings();
             }
 
-            await EnsureGlossaryAsync(projectKey, cancellationToken).ConfigureAwait(false);
+            await EnsureGlossaryAsync(existing, cancellationToken).ConfigureAwait(false);
             return existing;
         }
 
@@ -83,7 +87,7 @@ public sealed class TranslationService : ITranslationService
         };
 
         await projectStore.SaveProgressAsync(project, cancellationToken).ConfigureAwait(false);
-        await EnsureGlossaryAsync(projectKey, cancellationToken).ConfigureAwait(false);
+        await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
         return project;
     }
 
@@ -149,7 +153,7 @@ public sealed class TranslationService : ITranslationService
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        var glossary = await EnsureGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
+        var glossary = await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
         var translationCache = await projectStore.LoadTranslationsCacheAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
         var fileCache = await projectStore.LoadFileTranslationsAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
 
@@ -222,7 +226,7 @@ public sealed class TranslationService : ITranslationService
                 item.Entry.Status = TranslationEntryStatus.Translated;
                 item.Entry.IsManuallyEdited = false;
 
-                translationCache[item.Entry.Original] = translated;
+                translationCache[TranslationTextTools.BuildCacheKey(project.ProviderSettings.TargetLanguage, item.Entry.Original)] = translated;
                 if (!fileCache.TryGetValue(item.File.RelativePath, out var perFile))
                 {
                     perFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -261,9 +265,10 @@ public sealed class TranslationService : ITranslationService
             return "";
         }
 
-        var glossary = await EnsureGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
+        var glossary = await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
         var translationCache = await projectStore.LoadTranslationsCacheAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
-        if (translationCache.TryGetValue(sourceText, out var cached) && !string.IsNullOrWhiteSpace(cached))
+        var cacheKey = TranslationTextTools.BuildCacheKey(project.ProviderSettings.TargetLanguage, sourceText);
+        if (translationCache.TryGetValue(cacheKey, out var cached) && !string.IsNullOrWhiteSpace(cached))
         {
             return cached;
         }
@@ -278,13 +283,240 @@ public sealed class TranslationService : ITranslationService
         var result = translations.FirstOrDefault() ?? "";
         if (!string.IsNullOrWhiteSpace(result))
         {
-            translationCache[sourceText] = result;
+            translationCache[cacheKey] = result;
             await projectStore.SaveTranslationsCacheAsync(project.ProjectKey, translationCache, cancellationToken).ConfigureAwait(false);
+
+            // Persist the newly translated term into the project glossary so it is
+            // reused within this project and synced to the global glossary below.
+            // (Without this, new terms only land in the translation cache and never
+            // reach the global glossary — the sync reads the project glossary.)
+            if (!glossary.TryGetValue(sourceText, out var current) ||
+                !string.Equals(current, result, StringComparison.Ordinal))
+            {
+                glossary[sourceText] = result;
+                await projectStore.SaveGlossaryAsync(project.ProjectKey, glossary, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         await SyncToGlobalGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
 
         return result;
+    }
+
+    public async Task<int> ImportExistingTranslationsAsync(
+        TranslationProgressDocument project,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(project.OutputDirectory) ||
+            !Directory.Exists(project.OutputDirectory))
+        {
+            return 0;
+        }
+
+        var outputRoot = Path.GetFullPath(project.OutputDirectory);
+        var outputFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFiles(outputRoot, "*", SearchOption.AllDirectories))
+        {
+            outputFiles[Path.GetRelativePath(outputRoot, path).Replace('\\', '/')] = path;
+        }
+
+        var importedCount = 0;
+        var matchedFileCount = 0;
+
+        foreach (var file in project.Files.Where(item => item.IsSelected))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var effectiveMode = ResolveEffectiveMode(file);
+            var outputRelPath = effectiveMode == TranslationGenerationMode.Patch
+                ? $"{file.RelativePath}.patch"
+                : file.RelativePath;
+
+            if (!TryFindOutputFile(outputFiles, outputRelPath, out var outputFilePath))
+            {
+                continue;
+            }
+
+            // 已翻译的条目不覆盖，只回填尚未翻译的。
+            var pathToValue = effectiveMode == TranslationGenerationMode.Patch
+                ? ParsePatchFile(outputFilePath)
+                : ParseOverwriteFile(outputFilePath);
+
+            if (pathToValue is null || pathToValue.Count == 0)
+            {
+                continue;
+            }
+
+            var fileImported = 0;
+            foreach (var entry in file.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!string.IsNullOrWhiteSpace(entry.Translated))
+                {
+                    continue;
+                }
+
+                if (!pathToValue.TryGetValue(entry.Path, out var translated) ||
+                    string.IsNullOrWhiteSpace(translated) ||
+                    string.Equals(translated, entry.Original, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                entry.Translated = translated;
+                entry.Status = TranslationEntryStatus.Translated;
+                entry.IsManuallyEdited = false;
+                fileImported++;
+            }
+
+            if (fileImported > 0)
+            {
+                importedCount += fileImported;
+                matchedFileCount++;
+                progress?.Report($"已从 {file.RelativePath} 导入 {fileImported} 条翻译");
+            }
+        }
+
+        if (importedCount > 0)
+        {
+            await SaveProjectAsync(project, cancellationToken).ConfigureAwait(false);
+            progress?.Report($"导入完成：{matchedFileCount} 个文件，共 {importedCount} 条翻译。");
+        }
+
+        return importedCount;
+    }
+
+    private static bool TryFindOutputFile(
+        IReadOnlyDictionary<string, string> outputFiles,
+        string outputRelPath,
+        out string filePath)
+    {
+        if (outputFiles.TryGetValue(outputRelPath, out filePath!))
+        {
+            return true;
+        }
+
+        // 兼容补丁目录外层多包了一层文件夹的情况：按后缀匹配。
+        var suffix = "/" + outputRelPath;
+        foreach (var (relative, path) in outputFiles)
+        {
+            if (relative.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                filePath = path;
+                return true;
+            }
+        }
+
+        filePath = "";
+        return false;
+    }
+
+    /// <summary>
+    /// 解析 .patch 补丁文件：数组形式的 [{"op":"replace","path":"/name","value":"..."} ...]。
+    /// 返回 去前导斜杠的路径 → 译文 的映射。
+    /// </summary>
+    private static Dictionary<string, string>? ParsePatchFile(string filePath)
+    {
+        try
+        {
+            var json = File.ReadAllText(filePath);
+            using var document = JsonDocument.Parse(json);
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return result;
+            }
+
+            foreach (var operation in document.RootElement.EnumerateArray())
+            {
+                if (operation.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                var path = operation.TryGetProperty("path", out var pathProperty)
+                    ? pathProperty.GetString()
+                    : null;
+                var value = operation.TryGetProperty("value", out var valueProperty)
+                    ? valueProperty.GetString()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(path) || value is null)
+                {
+                    continue;
+                }
+
+                var key = path.StartsWith("/", StringComparison.Ordinal) ? path.Substring(1) : path;
+                result[key] = value;
+            }
+
+            return result;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 解析整文件覆盖模式输出的 JSON，遍历所有字符串值。
+    /// 路径格式与条目 Path 一致（无前导斜杠，如 "name"、"items/0/label"）。
+    /// </summary>
+    private static Dictionary<string, string>? ParseOverwriteFile(string filePath)
+    {
+        try
+        {
+            var json = File.ReadAllText(filePath);
+            using var document = JsonDocument.Parse(json);
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            CollectStringValues(document.RootElement, "", result);
+            return result;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static void CollectStringValues(
+        JsonElement element,
+        string pointer,
+        Dictionary<string, string> result)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var childPointer = pointer.Length == 0
+                        ? property.Name
+                        : $"{pointer}/{property.Name}";
+                    CollectStringValues(property.Value, childPointer, result);
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    CollectStringValues(item, $"{pointer}/{index}", result);
+                    index++;
+                }
+
+                break;
+
+            case JsonValueKind.String:
+                if (!string.IsNullOrEmpty(pointer))
+                {
+                    result[pointer] = element.GetString() ?? "";
+                }
+
+                break;
+        }
     }
 
     public async Task GenerateOutputAsync(
@@ -414,16 +646,31 @@ public sealed class TranslationService : ITranslationService
             project.ProjectKey,
             fileCache.ToDictionary(pair => pair.Key, pair => (IDictionary<string, string>)pair.Value, StringComparer.OrdinalIgnoreCase),
             cancellationToken).ConfigureAwait(false);
-        await projectStore.SaveGlossaryAsync(project.ProjectKey, await EnsureGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+        await projectStore.SaveGlossaryAsync(project.ProjectKey, await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<Dictionary<string, string>> EnsureGlossaryAsync(string projectKey, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, string>> EnsureGlossaryAsync(TranslationProgressDocument project, CancellationToken cancellationToken)
     {
-        // Load project-local glossary
-        var glossary = await projectStore.LoadGlossaryAsync(projectKey, cancellationToken).ConfigureAwait(false);
+        // Load project-local glossary. Normalize to case-insensitive so that
+        // case-variant duplicates (e.g. "apex"/"Apex") collapse instead of
+        // coexisting — matching the global glossary's COLLATE NOCASE semantics.
+        var glossary = await projectStore.LoadGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
+        if (glossary.Count > 0)
+        {
+            var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in glossary)
+            {
+                normalized[key] = value; // last write wins on case-insensitive collision
+            }
 
-        // Merge global glossary as fallback (project glossary overrides global)
-        var globalLookup = await globalGlossaryStore.BuildLookupAsync(cancellationToken).ConfigureAwait(false);
+            glossary = normalized;
+        }
+
+        // Merge global glossary as fallback (project glossary overrides global).
+        // Lookup is scoped to the project's target language (e.g. zh-CN, zh-TW, ja),
+        // matching the language the translation engines are configured to produce.
+        var targetLanguage = project.ProviderSettings.TargetLanguage;
+        var globalLookup = await globalGlossaryStore.BuildLookupAsync(targetLanguage, cancellationToken).ConfigureAwait(false);
         foreach (var (key, value) in globalLookup)
         {
             if (!glossary.ContainsKey(key))
@@ -439,7 +686,7 @@ public sealed class TranslationService : ITranslationService
         }
 
         // Save merged glossary back to project
-        await projectStore.SaveGlossaryAsync(projectKey, glossary, cancellationToken).ConfigureAwait(false);
+        await projectStore.SaveGlossaryAsync(project.ProjectKey, glossary, cancellationToken).ConfigureAwait(false);
 
         return glossary;
     }
@@ -553,6 +800,7 @@ public sealed class TranslationService : ITranslationService
         {
             TranslationEngineType.Google => googleEngine,
             TranslationEngineType.OpenAI => openAiEngine,
+            TranslationEngineType.GoogleFree => googleFreeEngine,
             _ => openAiEngine
         };
     }
@@ -602,16 +850,22 @@ public sealed class TranslationService : ITranslationService
             if (glossary.Count == 0) return;
 
             var now = DateTimeOffset.Now;
-            foreach (var (source, target) in glossary)
-            {
-                if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(target)) continue;
-                await globalGlossaryStore.UpsertAsync(new TranslationGlossaryEntry
+            var targetLanguage = project.ProviderSettings.TargetLanguage;
+            var entries = glossary
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                .Select(pair => new TranslationGlossaryEntry
                 {
-                    Source = source,
-                    Target = target,
+                    Source = pair.Key,
+                    Target = pair.Value,
+                    Language = targetLanguage,
                     EntrySource = GlossaryEntrySource.AutoFromCache,
                     ModifiedAt = now
-                }, cancellationToken).ConfigureAwait(false);
+                })
+                .ToList();
+
+            if (entries.Count > 0)
+            {
+                await globalGlossaryStore.UpsertManyAsync(entries, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

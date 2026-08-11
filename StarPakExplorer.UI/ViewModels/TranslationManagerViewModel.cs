@@ -37,6 +37,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
     private System.ComponentModel.ICollectionView? entriesView;
 
     // ── Engine configuration ──
+    private string targetLanguage = "zh-CN";
     private string openAiApiKey = "";
     private string openAiModel = "gpt-4.1-mini";
     private string openAiBaseUrl = "https://api.openai.com/v1";
@@ -81,6 +82,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         ScanCommand = new AsyncRelayCommand(ScanAsync, () => !IsBusy);
         TranslateCommand = new AsyncRelayCommand(TranslateAsync, () => !IsBusy && project is not null && project.Files.Count > 0);
         GenerateCommand = new AsyncRelayCommand(GenerateAsync, () => !IsBusy && project is not null && project.Files.Count > 0);
+        ImportExistingCommand = new AsyncRelayCommand(ImportExistingAsync, () => !IsBusy && project is not null && project.Files.Count > 0);
         SelectFilteredFilesCommand = new RelayCommand(SelectFilteredFiles, () => !IsBusy);
         ClearFilteredFilesCommand = new RelayCommand(ClearFilteredFiles, () => !IsBusy);
         TranslateCurrentEntryCommand = new AsyncRelayCommand(TranslateCurrentEntryAsync, () => !IsBusy && SelectedEntry is not null);
@@ -111,6 +113,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
     public AsyncRelayCommand ScanCommand { get; }
     public AsyncRelayCommand TranslateCommand { get; }
     public AsyncRelayCommand GenerateCommand { get; }
+    public AsyncRelayCommand ImportExistingCommand { get; }
     public RelayCommand SelectFilteredFilesCommand { get; }
     public RelayCommand ClearFilteredFilesCommand { get; }
     public AsyncRelayCommand TranslateCurrentEntryCommand { get; }
@@ -268,6 +271,12 @@ public sealed class TranslationManagerViewModel : ViewModelBase
     public IEnumerable<TranslationEngineType> EngineOptions =>
         Enum.GetValues<TranslationEngineType>();
 
+    /// <summary>是否显示 Google Cloud（付费）配置面板——仅当选中 Google 引擎时。</summary>
+    public bool IsGooglePaidConfigVisible => SelectedEngine == TranslationEngineType.Google;
+
+    /// <summary>是否显示 Google 免费引擎提示——仅当选中 GoogleFree 引擎时。</summary>
+    public bool IsGoogleFreeNoteVisible => SelectedEngine == TranslationEngineType.GoogleFree;
+
     public TranslationEngineType SelectedEngine
     {
         get => selectedEngine;
@@ -277,11 +286,31 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             {
                 SyncSettingsToProject();
                 SaveEngineCache();
+                OnPropertyChanged(nameof(IsGooglePaidConfigVisible));
+                OnPropertyChanged(nameof(IsGoogleFreeNoteVisible));
             }
         }
     }
 
     private TranslationEngineType selectedEngine = TranslationEngineType.OpenAI;
+
+    /// <summary>可选的目标语言（BCP-47），用于 ComboBox 快捷选择，也可手动输入。</summary>
+    public IReadOnlyList<string> TargetLanguageOptions { get; } =
+        new[] { "zh-CN", "zh-TW", "ja", "ko", "en", "de", "fr", "es", "ru" };
+
+    /// <summary>目标语言（BCP-47），例如 zh-CN / zh-TW / ja / ko。翻译结果与全局词库将按此语言保存。</summary>
+    public string TargetLanguage
+    {
+        get => targetLanguage;
+        set
+        {
+            if (SetProperty(ref targetLanguage, value))
+            {
+                SyncSettingsToProject();
+                SaveEngineCache();
+            }
+        }
+    }
 
     public string OpenAiApiKey
     {
@@ -389,6 +418,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             GoogleProjectId = ps.Google.ProjectId;
             GoogleLocation = string.IsNullOrWhiteSpace(ps.Google.Location) ? "global" : ps.Google.Location;
             GoogleServiceAccountJsonPath = ps.Google.ServiceAccountJsonPath;
+            TargetLanguage = string.IsNullOrWhiteSpace(ps.TargetLanguage) ? "zh-CN" : ps.TargetLanguage;
         }
         else
         {
@@ -401,6 +431,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
             GoogleLocation = string.IsNullOrWhiteSpace(cached.Google.Location) ? "global" : cached.Google.Location;
             GoogleServiceAccountJsonPath = cached.Google.ServiceAccountJsonPath;
             SelectedEngine = cached.PreferredEngine;
+            TargetLanguage = string.IsNullOrWhiteSpace(cached.TargetLanguage) ? "zh-CN" : cached.TargetLanguage;
         }
 
         // 同步到项目对象 + 更新缓存
@@ -413,6 +444,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         engineCache.Save(new TranslationProviderSettings
         {
             PreferredEngine = SelectedEngine,
+            TargetLanguage = TargetLanguage,
             OpenAi = new OpenAiTranslationSettings
             {
                 ApiKey = OpenAiApiKey,
@@ -440,6 +472,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         }
 
         project.ProviderSettings.PreferredEngine = SelectedEngine;
+        project.ProviderSettings.TargetLanguage = TargetLanguage;
         project.ProviderSettings.OpenAi.ApiKey = OpenAiApiKey;
         project.ProviderSettings.OpenAi.Model = OpenAiModel;
         project.ProviderSettings.OpenAi.BaseUrl = OpenAiBaseUrl;
@@ -589,6 +622,12 @@ public sealed class TranslationManagerViewModel : ViewModelBase
 
             PopulateFilesFromProject();
 
+            // 若输出目录里已有翻译过的补丁，自动回填已翻译项（重复检查）。
+            if (project.Files.Count > 0 && HasPatchFiles(OutputDirectory))
+            {
+                _ = ImportExistingAsync();
+            }
+
             StatusMessage = $"项目加载完成 —— {project.Files.Count} 个文件，"
                 + $"{project.Files.Sum(f => f.Entries.Count)} 个条目。";
         }
@@ -622,6 +661,13 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
         {
             OutputDirectory = dialog.SelectedPath;
+
+            // 填入输出目录后自动做一次“重复检查”：
+            // 若目录里已有翻译过的补丁，自动回填已翻译项。
+            if (project is not null && Directory.Exists(OutputDirectory))
+            {
+                _ = ImportExistingAsync();
+            }
         }
     }
 
@@ -754,6 +800,56 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         {
             logger.Error("Patch generation failed", ex);
             StatusMessage = $"生成失败: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    //  Command: ImportExisting (从已有补丁回填翻译)
+    // ═══════════════════════════════════════════════
+
+    private async Task ImportExistingAsync()
+    {
+        if (project is null)
+        {
+            return;
+        }
+
+        SyncSettingsToProject();
+        SaveEngineCache();
+
+        IsBusy = true;
+        StatusMessage = "正在检查输出目录中的已有补丁翻译...";
+
+        try
+        {
+            var imported = await translationService.ImportExistingTranslationsAsync(
+                project,
+                new Progress<string>(msg => StatusMessage = msg),
+                cancellationTokenSource.Token);
+
+            RefreshAllViewModels();
+
+            if (imported > 0)
+            {
+                StatusMessage = $"已从输出目录回填 {imported} 条翻译，未翻译部分可继续用所选引擎翻译。";
+            }
+            else
+            {
+                StatusMessage = "输出目录中未发现可回填的已有翻译。";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "操作已取消。";
+        }
+        catch (Exception ex)
+        {
+            logger.Error("Import existing translations failed", ex);
+            StatusMessage = $"导入失败: {ex.Message}";
         }
         finally
         {
@@ -1007,6 +1103,7 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         ScanCommand.RaiseCanExecuteChanged();
         TranslateCommand.RaiseCanExecuteChanged();
         GenerateCommand.RaiseCanExecuteChanged();
+        ImportExistingCommand.RaiseCanExecuteChanged();
         SelectFilteredFilesCommand.RaiseCanExecuteChanged();
         ClearFilteredFilesCommand.RaiseCanExecuteChanged();
         TranslateCurrentEntryCommand.RaiseCanExecuteChanged();
@@ -1014,6 +1111,16 @@ public sealed class TranslationManagerViewModel : ViewModelBase
         SkipCurrentEntryCommand.RaiseCanExecuteChanged();
         ConfirmCurrentEntryCommand.RaiseCanExecuteChanged();
         BrowseGoogleServiceAccountCommand.RaiseCanExecuteChanged();
+    }
+
+    private static bool HasPatchFiles(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        return Directory.EnumerateFiles(directory, "*.patch", SearchOption.AllDirectories).Any();
     }
 
     private static string SanitizeFileName(string name)

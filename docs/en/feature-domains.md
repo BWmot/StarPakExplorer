@@ -86,7 +86,7 @@ Methods: `GetPatchRoot()`, `GetPatchKey()`, `EnsurePatchSetAsync()`, `SaveTextAs
 | `PatchRootDirectory` | Custom patch storage root (default: `%LOCALAPPDATA%\StarPakExplorer\Patches`) |
 | `CacheRootDirectory` | Custom cache root (default: `%LOCALAPPDATA%\StarPakExplorer\Cache`) |
 | `TranslationRootDirectory` | Custom translation project root (default: `%LOCALAPPDATA%\StarPakExplorer\Translations`) |
-| `GlobalGlossaryPath` | Global glossary file path (default blank: uses `<install directory>\global_glossary.json`) |
+| `GlobalGlossaryPath` | Global glossary SQLite database path (default blank: uses `<install directory>\global_glossary.db`) |
 
 ## Translation Pipeline & Glossary
 
@@ -109,19 +109,21 @@ The translation system uses a dual-layer glossary architecture to ensure transla
 
 Each translation project maintains an independent project-level glossary, stored as `glossary.json` in the project directory. Project glossary entries only take effect within that project, allowing different mods to use different term mappings.
 
-#### Layer 2: Global Glossary (New)
+#### Layer 2: Global Glossary
 
-**Location**: `<install directory>\global_glossary.json` (customizable path in settings)
+**Storage**: SQLite database at `<install directory>\global_glossary.db` (customizable path in settings). Stored via `SqliteGlobalGlossaryStore` using `Microsoft.Data.Sqlite`; the legacy `global_glossary.json` file is automatically migrated to the database on first launch (the old file is renamed to `global_glossary.json.migrated`).
 
-**Interface**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/`)
+**Interface**: `IGlobalGlossaryStore` → `SqliteGlobalGlossaryStore` (`Infrastructure/Translation/`)
 
 Core methods:
 - `LoadAllAsync()` / `SaveAllAsync()` — Load/save the global glossary
-- `UpsertAsync(key, value)` — Add or update a single entry
-- `DeleteAsync(key)` — Remove an entry
-- `ImportFromFileAsync(path)` — Import from external term bank file (supports `English|||Chinese` format)
+- `UpsertAsync(entry)` / `UpsertManyAsync(entries)` — Add or update entries (batch upsert keeps the table small and fast)
+- `DeleteAsync(source, language)` / `DeleteManyAsync(keys)` — Remove entries
+- `SearchAsync(keyword, language, limit)` — LIKE-based search across source/target/category/notes (case-insensitive, up to 2000 rows in the UI)
+- `CountAsync()` — Total entry count
+- `ImportFromFileAsync(path, language)` — Import from external term bank file (supports `English|||Chinese` format, keeps existing entries)
 - `ExportToFileAsync(path)` — Export glossary to file
-- `BuildLookupAsync()` — Build a `Dictionary<string, string>` lookup table
+- `BuildLookupAsync(language)` — Build a `Dictionary<string, string>` lookup table
 
 #### Glossary Merge Strategy
 
@@ -139,13 +141,14 @@ After each translation completes, `TranslationService.SyncToGlobalGlossaryAsync(
 
 - **Auto-import at startup**: `App.xaml.cs` attempts to import pre-built term bank files from the `_ref_trans/doc/` directory on startup
 - **Settings UI management**: `SettingsWindow` provides "Import Term Bank..." and "Export Term Bank..." buttons for manual glossary management
+- **Glossary window**: `GlossaryWindow` (opened via 菜单 → 编辑 → 术语库管理...) backed by `GlossaryViewModel` lets you browse, search, add, edit, delete, import and export glossary terms in-app; inline edits commit back to the SQLite store per-row
 - **Entry source tracking**: `TranslationGlossaryEntry.EntrySource` records origin (Imported/User/AutoFromCache), `ModifiedAt` records modification time
 
 #### Key Interfaces
 
 | Interface | Implementation | Location |
 |-----------|---------------|----------|
-| `IGlobalGlossaryStore` | `GlobalGlossaryStore` | `Infrastructure/Translation/` |
+| `IGlobalGlossaryStore` | `SqliteGlobalGlossaryStore` | `Infrastructure/Translation/` |
 | `ITranslationService` | `TranslationService` | `Application/Services/` |
 | `ITranslationEngine` | `GoogleTranslationEngine` | `Infrastructure/Translation/` |
 | `ITranslationEngine` | `OpenAiTranslationEngine` | `Infrastructure/Translation/` |

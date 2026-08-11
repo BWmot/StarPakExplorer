@@ -50,7 +50,7 @@ All models are simple `{ get; set; }` or `{ get; init; }` POCOs under `Applicati
 | `TranslationModMetadata` | Version, Author, ModName, FriendlyName, Description, Link, Priority |
 | `TranslatableEntry` | RelativePath, ItemName, FileType, SourceFields, TranslatedFields |
 | `TranslationSourceEntry` | Path, Original, TokenStartIndex, TokenEndIndex |
-| `TranslationGlossaryEntry` | Source, Target |
+| `TranslationGlossaryEntry` | Source, Target, Language (BCP-47, default zh-CN) |
 | `TranslationEngineType` | Enum: Google=0, OpenAI=1 |
 | `GoogleTranslationSettings` | ProjectId, Location, ServiceAccountJsonPath, GlossaryName |
 | `OpenAiTranslationSettings` | ApiKey, Model, BaseUrl |

@@ -101,6 +101,7 @@ public sealed class MainViewModel : ViewModelBase
         OpenSettingsCommand = new RelayCommand(OpenSettings, () => !IsBusy);
         OpenPatchManagerCommand = new RelayCommand(OpenPatchManager, () => !IsBusy);
         OpenTranslationManagerCommand = new RelayCommand(OpenTranslationManager, () => !IsBusy);
+        OpenGlossaryCommand = new RelayCommand(OpenGlossary, () => !IsBusy);
         OpenPackManagerCommand = new RelayCommand(OpenPackManager, () => !IsBusy);
         QuickPackCommand = new AsyncRelayCommand(QuickPackAsync, () => !IsBusy);
         SelectAllExtensionsCommand = new RelayCommand(SelectAllExtensions, CanModifyExtensions);
@@ -146,6 +147,8 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand OpenPatchManagerCommand { get; }
 
     public RelayCommand OpenTranslationManagerCommand { get; }
+
+    public RelayCommand OpenGlossaryCommand { get; }
 
     public RelayCommand OpenPackManagerCommand { get; }
 
@@ -1032,7 +1035,7 @@ public sealed class MainViewModel : ViewModelBase
             {
                 try
                 {
-                    var count = await globalGlossaryStore.ImportFromFileAsync(path, CancellationToken.None);
+                    var count = await globalGlossaryStore.ImportFromFileAsync(path, "zh-CN", CancellationToken.None);
                     logger.Info($"Imported {count} terms from {path}");
                 }
                 catch (Exception ex)
@@ -1103,6 +1106,24 @@ public sealed class MainViewModel : ViewModelBase
         catch (Exception exception)
         {
             logger.Error("Open translation manager failed", exception);
+            ShowWarning(exception.Message);
+        }
+    }
+
+    private void OpenGlossary()
+    {
+        try
+        {
+            var window = new GlossaryWindow(new GlossaryViewModel(globalGlossaryStore, logger, appSettings.GlossaryLanguages))
+            {
+                Owner = System.Windows.Application.Current?.MainWindow
+            };
+
+            window.ShowDialog();
+        }
+        catch (Exception exception)
+        {
+            logger.Error("Open glossary window failed", exception);
             ShowWarning(exception.Message);
         }
     }
@@ -1232,6 +1253,7 @@ public sealed class MainViewModel : ViewModelBase
         ClearCacheSelectionCommand.RaiseCanExecuteChanged();
         OpenModifyWindowCommand.RaiseCanExecuteChanged();
         OpenSettingsCommand.RaiseCanExecuteChanged();
+        OpenGlossaryCommand.RaiseCanExecuteChanged();
         OpenPatchManagerCommand.RaiseCanExecuteChanged();
         OpenTranslationManagerCommand.RaiseCanExecuteChanged();
         OpenPackManagerCommand.RaiseCanExecuteChanged();

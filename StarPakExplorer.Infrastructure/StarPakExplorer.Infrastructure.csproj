@@ -7,4 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\StarPakExplorer.Application\StarPakExplorer.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+  </ItemGroup>
 </Project>

@@ -86,7 +86,7 @@
 | `PatchRootDirectory` | 自定义补丁存储根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Patches`) |
 | `CacheRootDirectory` | 自定义缓存根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Cache`) |
 | `TranslationRootDirectory` | 自定义翻译项目根目录 (默认: `%LOCALAPPDATA%\StarPakExplorer\Translations`) |
-| `GlobalGlossaryPath` | 全局术语表路径 (默认留空: 使用 `<安装目录>\global_glossary.json`) |
+| `GlobalGlossaryPath` | 全局术语表 SQLite 数据库路径 (默认留空: 使用 `<安装目录>\global_glossary.db`) |
 
 ## 翻译流水线与术语表
 
@@ -109,19 +109,21 @@
 
 每个翻译项目维护独立的项目级术语表，存储在项目目录下的 `glossary.json`。项目术语表的条目仅在该项目内生效，允许不同模组使用不同的术语映射。
 
-#### 第二层：全局术语表 (新增)
+#### 第二层：全局术语表
 
-**位置**: `<安装目录>\global_glossary.json`（可在设置中自定义路径）
+**存储**: SQLite 数据库，位于 `<安装目录>\global_glossary.db`（可在设置中自定义路径）。由 `SqliteGlobalGlossaryStore` 基于 `Microsoft.Data.Sqlite` 实现；首次启动时旧版 `global_glossary.json` 会自动迁移为数据库（原文件重命名为 `global_glossary.json.migrated`）。
 
-**接口**: `IGlobalGlossaryStore` → `GlobalGlossaryStore` (`Infrastructure/Translation/`)
+**接口**: `IGlobalGlossaryStore` → `SqliteGlobalGlossaryStore` (`Infrastructure/Translation/`)
 
 核心方法:
 - `LoadAllAsync()` / `SaveAllAsync()` — 加载/保存全局术语表
-- `UpsertAsync(key, value)` — 添加或更新单个条目
-- `DeleteAsync(key)` — 删除条目
-- `ImportFromFileAsync(path)` — 从外部术语库文件导入（支持 `英文|||中文` 格式）
+- `UpsertAsync(entry)` / `UpsertManyAsync(entries)` — 添加或更新条目（批量写入保持表体积小、查询快）
+- `DeleteAsync(source, language)` / `DeleteManyAsync(keys)` — 删除条目
+- `SearchAsync(keyword, language, limit)` — 对原文/译文/类别/备注做 LIKE 模糊搜索（不区分大小写，界面最多显示 2000 条）
+- `CountAsync()` — 总条数
+- `ImportFromFileAsync(path, language)` — 从外部术语库文件导入（支持 `英文|||中文` 格式，保留已有条目）
 - `ExportToFileAsync(path)` — 导出术语表到文件
-- `BuildLookupAsync()` — 构建 `Dictionary<string, string>` 查询表
+- `BuildLookupAsync(language)` — 构建 `Dictionary<string, string>` 查询表
 
 #### 术语表合并策略
 
@@ -139,13 +141,14 @@
 
 - **启动时自动导入**: `App.xaml.cs` 在启动时尝试从 `_ref_trans/doc/` 目录导入预置的术语库文件（`星界边境术语库-英中.txt` 等）
 - **设置界面管理**: `SettingsWindow` 提供「从术语库导入...」和「导出术语库...」按钮，用户可手动管理术语表
+- **术语库窗口**: `GlossaryWindow`（菜单 → 编辑 → 术语库管理...）由 `GlossaryViewModel` 驱动，可在应用内浏览、搜索、新增、编辑、删除、导入、导出术语条目；单元格内编辑完成后逐条写回 SQLite
 - **条目来源追踪**: `TranslationGlossaryEntry.EntrySource` 记录来源 (Imported/User/AutoFromCache)，`ModifiedAt` 记录修改时间
 
 #### 关键接口
 
 | 接口 | 实现 | 位置 |
 |-----------|---------------|----------|
-| `IGlobalGlossaryStore` | `GlobalGlossaryStore` | `Infrastructure/Translation/` |
+| `IGlobalGlossaryStore` | `SqliteGlobalGlossaryStore` | `Infrastructure/Translation/` |
 | `ITranslationService` | `TranslationService` | `Application/Services/` |
 | `ITranslationEngine` | `GoogleTranslationEngine` | `Infrastructure/Translation/` |
 | `ITranslationEngine` | `OpenAiTranslationEngine` | `Infrastructure/Translation/` |

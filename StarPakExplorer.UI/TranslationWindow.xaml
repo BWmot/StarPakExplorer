@@ -378,7 +378,21 @@
                                                           ItemsSource="{Binding EngineOptions}"
                                                           SelectedItem="{Binding SelectedEngine}" />
                                             </StackPanel>
-                                            <TextBlock Text="选择 OpenAI 或 Google Cloud Translation。配置完引擎参数后即可使用单条/批量翻译。"
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                <TextBlock Text="目标语言"
+                                                           Width="84"
+                                                           VerticalAlignment="Center" />
+                                                <ComboBox Width="220"
+                                                          ItemsSource="{Binding TargetLanguageOptions}"
+                                                          Text="{Binding TargetLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                                          IsEditable="True" />
+                                                <TextBlock Text="目标语言（BCP-47），如 zh-CN / zh-TW / ja / ko。翻译结果与全局词库将按此语言保存。"
+                                                           Foreground="#667"
+                                                           TextWrapping="Wrap"
+                                                           Margin="8,0,0,0"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Text="选择 OpenAI、Google Cloud（付费）或 GoogleFree（免费，无需配置）。配置完引擎参数后即可使用单条/批量翻译。"
                                                        Foreground="#667"
                                                        TextWrapping="Wrap" />
                                         </StackPanel>
@@ -440,7 +454,20 @@
                                             Background="#F7F9FC"
                                             BorderBrush="#DDE3EE"
                                             BorderThickness="1"
-                                            CornerRadius="6">
+                                            CornerRadius="6"
+                                            Margin="0,0,0,12"
+                                            Visibility="{Binding IsGoogleFreeNoteVisible, Converter={StaticResource BoolToVisibility}}">
+                                        <TextBlock Text="GoogleFree（谷歌翻译免费接口）：无需 Project ID / Service Account，选择后可直接翻译。注意该接口非官方、有限流，批量翻译时自动限速并重试。"
+                                                   Foreground="#43546A"
+                                                   TextWrapping="Wrap" />
+                                    </Border>
+
+                                    <Border Padding="12"
+                                            Background="#F7F9FC"
+                                            BorderBrush="#DDE3EE"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Visibility="{Binding IsGooglePaidConfigVisible, Converter={StaticResource BoolToVisibility}}">
                                         <Grid>
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto" />
@@ -454,7 +481,7 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
 
-                                            <TextBlock Text="Google"
+                                            <TextBlock Text="Google Cloud（付费）"
                                                        Grid.ColumnSpan="3"
                                                        FontWeight="SemiBold"
                                                        Margin="0,0,0,8" />

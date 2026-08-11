@@ -2,8 +2,14 @@ namespace StarPakExplorer.Application.Models;
 
 public sealed class TranslationGlossaryEntry
 {
+    /// <summary>The original (source-language) term, e.g. "Copper Ore".</summary>
     public string Source { get; set; } = "";
+
+    /// <summary>The translated term in <see cref="Language"/>, e.g. "铜矿石".</summary>
     public string Target { get; set; } = "";
+
+    /// <summary>BCP-47 language code of the target, e.g. "zh-CN", "zh-TW", "ja", "ko", "en".</summary>
+    public string Language { get; set; } = "zh-CN";
 
     /// <summary>Source of this entry: User, Imported, or AutoFromCache.</summary>
     public GlossaryEntrySource EntrySource { get; set; } = GlossaryEntrySource.Imported;
