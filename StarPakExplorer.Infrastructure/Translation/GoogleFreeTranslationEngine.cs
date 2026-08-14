@@ -151,6 +151,25 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
     // ── 本地术语表（免费接口无官方术语表支持）────────────────────────────
 
     /// <summary>
+    /// 单字术语中属于普通英文词（非专有名词）的多义词集合。
+    /// 这些词在 Starbound 语境里有专属译名，但在其他语境下有别的常见含义，
+    /// 例如 Apex（猿族/顶点）、Glitch（机械族/故障）、Avian（翼族/鸟类的）。
+    /// 对它们不做词边界盲替换，只在整句恰好等于该词时才套用术语表，
+    /// 避免 "apex predator" → "猿族捕食者" 这类语境错译。
+    /// 多字术语（如 "Iron Bar"）与未列入此集合的单字专有名词（如 "Floran"）
+    /// 仍按原逻辑强制替换。
+    /// </summary>
+    private static readonly HashSet<string> AmbiguousSingleWordTerms =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Apex",   // 猿族 (种族名) vs 顶点 (the apex of...)
+            "Glitch", // 机械族 (种族名) vs 故障 (a glitch)
+            "Avian",  // 翼族 (种族名) vs 鸟类的 (avian creatures)
+            "Human",  // 人类 (种族名) vs 人的/人为 (human error)
+            "Ark",    // 方舟 (建筑/舰船) vs 普通 "ark"
+        };
+
+    /// <summary>
     /// 将出现在文本中的术语表源词替换为唯一占位符，让机器翻译保持原样；
     /// 翻译完成后按占位符映射恢复为目标词，从而保证术语一致。
     /// </summary>
@@ -182,9 +201,40 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
             lookup.TryAdd(term.Key, term.Value);
         }
 
-        var pattern = string.Join("|", terms.Select(pair => @"\b" + Regex.Escape(pair.Key) + @"\b"));
         var placeholders = new Dictionary<int, string>();
         var counter = 0;
+
+        // 多义词整句匹配：当原文整体就是一个多义词时（如单独一条文本就是 "Apex"），
+        // 仍按术语表翻译（猿族），而不是交给机器翻译（会翻成"顶点"）。
+        var trimmed = text.Trim();
+        foreach (var term in terms)
+        {
+            if (!AmbiguousSingleWordTerms.Contains(term.Key))
+            {
+                continue;
+            }
+
+            if (!string.Equals(trimmed, term.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var token = $"[[[{counter}]]]";
+            placeholders[counter] = lookup[term.Key];
+            return (token, placeholders);
+        }
+
+        // 排除多义词，其余术语（多字短语 + 无歧义单字专有名词）继续做词边界盲替换。
+        var safeTerms = terms
+            .Where(term => !AmbiguousSingleWordTerms.Contains(term.Key))
+            .ToList();
+
+        if (safeTerms.Count == 0)
+        {
+            return (text, placeholders);
+        }
+
+        var pattern = string.Join("|", safeTerms.Select(pair => @"\b" + Regex.Escape(pair.Key) + @"\b"));
 
         var builder = Regex.Replace(text, pattern, match =>
         {
