@@ -43,7 +43,7 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
     public async Task<IReadOnlyList<string>> TranslateBatchAsync(
         IReadOnlyList<string> sourceTexts,
         TranslationProviderSettings settings,
-        IReadOnlyDictionary<string, string> glossary,
+        TranslationGlossary glossary,
         CancellationToken cancellationToken)
     {
         var results = new List<string>(sourceTexts.Count);
@@ -149,25 +149,8 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
     }
 
     // ── 本地术语表（免费接口无官方术语表支持）────────────────────────────
-
-    /// <summary>
-    /// 单字术语中属于普通英文词（非专有名词）的多义词集合。
-    /// 这些词在 Starbound 语境里有专属译名，但在其他语境下有别的常见含义，
-    /// 例如 Apex（猿族/顶点）、Glitch（机械族/故障）、Avian（翼族/鸟类的）。
-    /// 对它们不做词边界盲替换，只在整句恰好等于该词时才套用术语表，
-    /// 避免 "apex predator" → "猿族捕食者" 这类语境错译。
-    /// 多字术语（如 "Iron Bar"）与未列入此集合的单字专有名词（如 "Floran"）
-    /// 仍按原逻辑强制替换。
-    /// </summary>
-    private static readonly HashSet<string> AmbiguousSingleWordTerms =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "Apex",   // 猿族 (种族名) vs 顶点 (the apex of...)
-            "Glitch", // 机械族 (种族名) vs 故障 (a glitch)
-            "Avian",  // 翼族 (种族名) vs 鸟类的 (avian creatures)
-            "Human",  // 人类 (种族名) vs 人的/人为 (human error)
-            "Ark",    // 方舟 (建筑/舰船) vs 普通 "ark"
-        };
+    // 多义词术语由 TranslationGlossary.AmbiguousTerms 从术语库数据驱动，
+    // 不再在此硬编码。无歧义术语按词边界强制替换，多义词仅整句匹配。
 
     /// <summary>
     /// 将出现在文本中的术语表源词替换为唯一占位符，让机器翻译保持原样；
@@ -175,15 +158,15 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
     /// </summary>
     private static (string Text, Dictionary<int, string> Placeholders) ApplyGlossaryLocally(
         string text,
-        IReadOnlyDictionary<string, string> glossary)
+        TranslationGlossary glossary)
     {
-        if (string.IsNullOrWhiteSpace(text) || glossary is null || glossary.Count == 0)
+        if (string.IsNullOrWhiteSpace(text) || glossary is null || glossary.Lookup.Count == 0)
         {
             return (text, new Dictionary<int, string>());
         }
 
         // 长词优先，确保同一位置匹配最长术语。
-        var terms = glossary
+        var terms = glossary.Lookup
             .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
             .OrderByDescending(pair => pair.Key.Length)
             .ToList();
@@ -209,7 +192,7 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
         var trimmed = text.Trim();
         foreach (var term in terms)
         {
-            if (!AmbiguousSingleWordTerms.Contains(term.Key))
+            if (!glossary.AmbiguousTerms.Contains(term.Key))
             {
                 continue;
             }
@@ -226,7 +209,7 @@ public sealed class GoogleFreeTranslationEngine : ITranslationEngine
 
         // 排除多义词，其余术语（多字短语 + 无歧义单字专有名词）继续做词边界盲替换。
         var safeTerms = terms
-            .Where(term => !AmbiguousSingleWordTerms.Contains(term.Key))
+            .Where(term => !glossary.AmbiguousTerms.Contains(term.Key))
             .ToList();
 
         if (safeTerms.Count == 0)

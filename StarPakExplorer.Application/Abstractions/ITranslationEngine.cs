@@ -9,6 +9,6 @@ public interface ITranslationEngine
     Task<IReadOnlyList<string>> TranslateBatchAsync(
         IReadOnlyList<string> sourceTexts,
         TranslationProviderSettings settings,
-        IReadOnlyDictionary<string, string> glossary,
+        TranslationGlossary glossary,
         CancellationToken cancellationToken);
 }

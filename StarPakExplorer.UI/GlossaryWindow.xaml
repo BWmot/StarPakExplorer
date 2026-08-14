@@ -136,6 +136,12 @@
                                             SelectedItemBinding="{Binding EntrySource}"
                                             ItemsSource="{Binding DataContext.SourceOptions, ElementName=GlossaryRoot}"
                                             Width="90" />
+                    <DataGridComboBoxColumn Header="类型"
+                                            SelectedValueBinding="{Binding TermKind, UpdateSourceTrigger=LostFocus}"
+                                            SelectedValuePath="Key"
+                                            DisplayMemberPath="Value"
+                                            ItemsSource="{Binding DataContext.TermKindOptions, ElementName=GlossaryRoot}"
+                                            Width="90" />
                     <DataGridTextColumn Header="备注"
                                         Binding="{Binding Notes, UpdateSourceTrigger=LostFocus}"
                                         Width="2*" />

@@ -16,6 +16,7 @@ public sealed class GlossaryEntryRow : ViewModelBase
     private GlossaryEntrySource entrySource;
     private string? category;
     private string? notes;
+    private GlossaryTermKind? termKind;
     private DateTimeOffset modifiedAt;
 
     public GlossaryEntryRow(TranslationGlossaryEntry entry)
@@ -26,6 +27,7 @@ public sealed class GlossaryEntryRow : ViewModelBase
         entrySource = entry.EntrySource;
         category = entry.Category;
         notes = entry.Notes;
+        termKind = entry.TermKind;
         modifiedAt = entry.ModifiedAt;
         OriginalSource = entry.Source;
         OriginalLanguage = language;
@@ -74,6 +76,12 @@ public sealed class GlossaryEntryRow : ViewModelBase
     {
         get => notes;
         set => SetProperty(ref notes, value);
+    }
+
+    public GlossaryTermKind? TermKind
+    {
+        get => termKind;
+        set => SetProperty(ref termKind, value);
     }
 
     public DateTimeOffset ModifiedAt

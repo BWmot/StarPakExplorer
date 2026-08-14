@@ -22,6 +22,12 @@ public sealed class TranslationGlossaryEntry
 
     /// <summary>Free-form notes.</summary>
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Optional vocabulary kind. <see langword="null"/> means "not set":
+    /// the built-in default (if any) applies; explicit values override it.
+    /// </summary>
+    public GlossaryTermKind? TermKind { get; set; }
 }
 
 public enum GlossaryEntrySource
@@ -34,4 +40,13 @@ public enum GlossaryEntrySource
 
     /// <summary>Auto-saved from a completed translation.</summary>
     AutoFromCache = 2
+}
+
+public enum GlossaryTermKind
+{
+    /// <summary>普通词汇/专有名词：按词边界盲替换（默认行为）。</summary>
+    Default = 0,
+
+    /// <summary>多义词：仅当整段文本恰好等于该词时才套用术语表，避免语境错译。</summary>
+    Ambiguous = 1
 }

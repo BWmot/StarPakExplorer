@@ -17,7 +17,7 @@ public sealed class GoogleTranslationEngine : ITranslationEngine
     public async Task<IReadOnlyList<string>> TranslateBatchAsync(
         IReadOnlyList<string> sourceTexts,
         TranslationProviderSettings settings,
-        IReadOnlyDictionary<string, string> glossary,
+        TranslationGlossary glossary,
         CancellationToken cancellationToken)
     {
         var google = settings.Google;

@@ -16,7 +16,7 @@ public sealed class OpenAiTranslationEngine : ITranslationEngine
     public async Task<IReadOnlyList<string>> TranslateBatchAsync(
         IReadOnlyList<string> sourceTexts,
         TranslationProviderSettings settings,
-        IReadOnlyDictionary<string, string> glossary,
+        TranslationGlossary glossary,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.OpenAi.ApiKey))
@@ -472,24 +472,24 @@ Rules:
 """;
     }
 
-    private static string BuildUserPrompt(IReadOnlyList<string> sourceTexts, IReadOnlyDictionary<string, string> glossary, string targetLanguage)
+    private static string BuildUserPrompt(IReadOnlyList<string> sourceTexts, TranslationGlossary glossary, string targetLanguage)
     {
         // Only include glossary entries whose keys appear as substrings in any
         // source text.  Sending a massive glossary triggers context compression
         // in some proxies (DeepSeek V4), which confuses the model into thinking
         // it needs to "retrieve" compressed content.
         var relevantGlossary = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (glossary.Count <= 50)
+        if (glossary.Lookup.Count <= 50)
         {
             // 大小写不敏感去重，避免 "apex"/"Apex" 等仅大小写不同的重复源词导致异常。
-            foreach (var (key, value) in glossary)
+            foreach (var (key, value) in glossary.Lookup)
             {
                 relevantGlossary.TryAdd(key, value);
             }
         }
         else
         {
-            foreach (var (key, value) in glossary)
+            foreach (var (key, value) in glossary.Lookup)
             {
                 foreach (var text in sourceTexts)
                 {

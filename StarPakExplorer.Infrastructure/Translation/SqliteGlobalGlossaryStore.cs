@@ -164,13 +164,14 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO glossary (source, language, target, entry_source, category, notes, modified_at)
-                VALUES ($source, $language, $target, $entrySource, $category, $notes, $modifiedAt)
+                INSERT INTO glossary (source, language, target, entry_source, category, notes, term_kind, modified_at)
+                VALUES ($source, $language, $target, $entrySource, $category, $notes, $termKind, $modifiedAt)
                 ON CONFLICT(source, language) DO UPDATE SET
                     target = excluded.target,
                     entry_source = excluded.entry_source,
                     category = excluded.category,
                     notes = excluded.notes,
+                    term_kind = excluded.term_kind,
                     modified_at = excluded.modified_at;
                 """;
             var pSource = command.Parameters.Add("$source", SqliteType.Text);
@@ -179,6 +180,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
             var pEntrySource = command.Parameters.Add("$entrySource", SqliteType.Integer);
             var pCategory = command.Parameters.Add("$category", SqliteType.Text);
             var pNotes = command.Parameters.Add("$notes", SqliteType.Text);
+            var pTermKind = command.Parameters.Add("$termKind", SqliteType.Integer);
             var pModifiedAt = command.Parameters.Add("$modifiedAt", SqliteType.Text);
 
             int changed = 0;
@@ -189,7 +191,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
                     continue;
                 }
 
-                BindEntry(command, pSource, pLanguage, pTarget, pEntrySource, pCategory, pNotes, pModifiedAt, entry);
+                BindEntry(command, pSource, pLanguage, pTarget, pEntrySource, pCategory, pNotes, pTermKind, pModifiedAt, entry);
                 changed += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -299,12 +301,18 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
             }
 
             string source, target, entryLanguage;
+            GlossaryTermKind? termKind = null;
             if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[2]))
             {
                 // Explicit three-field line: source|||target|||language
+                // Optional fourth field: term kind (ambiguous/default).
                 source = DecodeUnicodeEscapes(parts[0].Trim());
                 target = DecodeUnicodeEscapes(parts[1].Trim());
                 entryLanguage = DecodeUnicodeEscapes(parts[2].Trim());
+                if (parts.Length >= 4)
+                {
+                    termKind = ParseTermKind(parts[3]);
+                }
             }
             else if (IsLikelyEnglish(parts[0]))
             {
@@ -330,6 +338,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
                 Target = target,
                 Language = entryLanguage,
                 EntrySource = GlossaryEntrySource.Imported,
+                TermKind = termKind,
                 ModifiedAt = now
             });
         }
@@ -362,19 +371,21 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         var lines = entries
             .OrderBy(e => e.Source, StringComparer.OrdinalIgnoreCase)
             .ThenBy(e => e.Language, StringComparer.OrdinalIgnoreCase)
-            .Select(e => $"{e.Source}|||{e.Target}|||{e.Language}");
+            .Select(e => e.TermKind == GlossaryTermKind.Ambiguous
+                ? $"{e.Source}|||{e.Target}|||{e.Language}|||ambiguous"
+                : $"{e.Source}|||{e.Target}|||{e.Language}");
 
         await File.WriteAllLinesAsync(filePath, lines, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<Dictionary<string, string>> BuildLookupAsync(string language, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TranslationGlossaryEntry>> LoadByLanguageAsync(string language, CancellationToken cancellationToken)
     {
         var entries = await LoadAllAsync(cancellationToken).ConfigureAwait(false);
         return entries
             .Where(e => string.Equals(e.Language, language, StringComparison.OrdinalIgnoreCase)
                         && !string.IsNullOrWhiteSpace(e.Source)
                         && !string.IsNullOrWhiteSpace(e.Target))
-            .ToDictionary(e => e.Source, e => e.Target, StringComparer.OrdinalIgnoreCase);
+            .ToList();
     }
 
     private async Task InitializeIfNeededAsync(CancellationToken cancellationToken)
@@ -404,6 +415,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
                         entry_source INTEGER NOT NULL DEFAULT 0,
                         category TEXT NULL,
                         notes TEXT NULL,
+                        term_kind INTEGER NULL,
                         modified_at TEXT NOT NULL,
                         PRIMARY KEY (source, language)
                     );
@@ -445,28 +457,34 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
     /// </summary>
     private static async Task MigrateSchemaIfNeededAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        bool hasLanguageColumn;
+        var hasLanguageColumn = false;
+        var hasTermKindColumn = false;
         await using (var pragma = connection.CreateCommand())
         {
             pragma.CommandText = "PRAGMA table_info(glossary);";
             await using var reader = await pragma.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            hasLanguageColumn = false;
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                if (string.Equals(reader.GetString(1), "language", StringComparison.OrdinalIgnoreCase))
+                var columnName = reader.GetString(1);
+                if (string.Equals(columnName, "language", StringComparison.OrdinalIgnoreCase))
                 {
                     hasLanguageColumn = true;
-                    break;
+                }
+                else if (string.Equals(columnName, "term_kind", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasTermKindColumn = true;
                 }
             }
         }
 
-        if (hasLanguageColumn)
+        if (hasLanguageColumn && hasTermKindColumn)
         {
             return;
         }
 
-        await using var transaction = connection.BeginTransaction();
+        if (!hasLanguageColumn)
+        {
+            await using var transaction = connection.BeginTransaction();
         try
         {
             await using (var migrate = connection.CreateCommand())
@@ -480,11 +498,12 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
                         entry_source INTEGER NOT NULL DEFAULT 0,
                         category TEXT NULL,
                         notes TEXT NULL,
+                        term_kind INTEGER NULL,
                         modified_at TEXT NOT NULL,
                         PRIMARY KEY (source, language)
                     );
-                    INSERT INTO glossary_new (source, language, target, entry_source, category, notes, modified_at)
-                        SELECT source, 'zh-CN', target, entry_source, category, notes, modified_at FROM glossary;
+                    INSERT INTO glossary_new (source, language, target, entry_source, category, notes, term_kind, modified_at)
+                        SELECT source, 'zh-CN', target, entry_source, category, notes, NULL, modified_at FROM glossary;
                     DROP TABLE glossary;
                     ALTER TABLE glossary_new RENAME TO glossary;
                     CREATE INDEX IF NOT EXISTS ix_glossary_target ON glossary(target);
@@ -499,6 +518,13 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         {
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             throw;
+        }
+        }
+        else if (!hasTermKindColumn)
+        {
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = "ALTER TABLE glossary ADD COLUMN term_kind INTEGER NULL;";
+            await alter.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -557,8 +583,8 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT OR IGNORE INTO glossary (source, language, target, entry_source, category, notes, modified_at)
-            VALUES ($source, $language, $target, $entrySource, $category, $notes, $modifiedAt);
+            INSERT OR IGNORE INTO glossary (source, language, target, entry_source, category, notes, term_kind, modified_at)
+            VALUES ($source, $language, $target, $entrySource, $category, $notes, $termKind, $modifiedAt);
             """;
         var pSource = command.Parameters.Add("$source", SqliteType.Text);
         var pLanguage = command.Parameters.Add("$language", SqliteType.Text);
@@ -566,6 +592,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         var pEntrySource = command.Parameters.Add("$entrySource", SqliteType.Integer);
         var pCategory = command.Parameters.Add("$category", SqliteType.Text);
         var pNotes = command.Parameters.Add("$notes", SqliteType.Text);
+        var pTermKind = command.Parameters.Add("$termKind", SqliteType.Integer);
         var pModifiedAt = command.Parameters.Add("$modifiedAt", SqliteType.Text);
 
         int inserted = 0;
@@ -576,7 +603,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
                 continue;
             }
 
-            BindEntry(command, pSource, pLanguage, pTarget, pEntrySource, pCategory, pNotes, pModifiedAt, entry);
+            BindEntry(command, pSource, pLanguage, pTarget, pEntrySource, pCategory, pNotes, pTermKind, pModifiedAt, entry);
             inserted += await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -591,6 +618,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         SqliteParameter pEntrySource,
         SqliteParameter pCategory,
         SqliteParameter pNotes,
+        SqliteParameter pTermKind,
         SqliteParameter pModifiedAt,
         TranslationGlossaryEntry entry)
     {
@@ -600,6 +628,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         pEntrySource.Value = (int)entry.EntrySource;
         pCategory.Value = string.IsNullOrWhiteSpace(entry.Category) ? DBNull.Value : entry.Category;
         pNotes.Value = string.IsNullOrWhiteSpace(entry.Notes) ? DBNull.Value : entry.Notes;
+        pTermKind.Value = entry.TermKind.HasValue ? (int)entry.TermKind.Value : DBNull.Value;
         pModifiedAt.Value = FormatTimestamp(entry.ModifiedAt);
     }
 
@@ -613,7 +642,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         var entries = new List<TranslationGlossaryEntry>();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT source, language, target, entry_source, category, notes, modified_at
+            SELECT source, language, target, entry_source, category, notes, modified_at, term_kind
             FROM glossary
             WHERE ($language IS NULL OR language = $language COLLATE NOCASE)
               AND ($keyword IS NULL
@@ -653,7 +682,7 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
         var entries = new List<TranslationGlossaryEntry>();
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT source, language, target, entry_source, category, notes, modified_at
+            SELECT source, language, target, entry_source, category, notes, modified_at, term_kind
             FROM glossary
             ORDER BY source COLLATE NOCASE, language COLLATE NOCASE;
             """;
@@ -677,8 +706,32 @@ public sealed class SqliteGlobalGlossaryStore : IGlobalGlossaryStore
             EntrySource = (GlossaryEntrySource)reader.GetInt32(3),
             Category = reader.IsDBNull(4) ? null : reader.GetString(4),
             Notes = reader.IsDBNull(5) ? null : reader.GetString(5),
-            ModifiedAt = ParseTimestamp(reader.GetString(6))
+            ModifiedAt = ParseTimestamp(reader.GetString(6)),
+            TermKind = reader.IsDBNull(7) ? null : (GlossaryTermKind)reader.GetInt32(7)
         };
+    }
+
+    private static GlossaryTermKind? ParseTermKind(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var normalized = raw.Trim();
+        if (normalized.Equals("ambiguous", StringComparison.OrdinalIgnoreCase)
+            || normalized is "1" or "true" or "多义" or "歧义")
+        {
+            return GlossaryTermKind.Ambiguous;
+        }
+
+        if (normalized.Equals("default", StringComparison.OrdinalIgnoreCase)
+            || normalized is "0" or "false" or "普通")
+        {
+            return GlossaryTermKind.Default;
+        }
+
+        return null;
     }
 
     private SqliteConnection CreateConnection()

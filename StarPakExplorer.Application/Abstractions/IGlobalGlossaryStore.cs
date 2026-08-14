@@ -67,8 +67,9 @@ public interface IGlobalGlossaryStore
     Task ExportToFileAsync(string filePath, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Get a lookup dictionary (Source → Target) restricted to one target
-    /// language, for use by translation engines.
+    /// Load all non-empty entries (Source → Target) restricted to one target
+    /// language, for use by the translation service. Includes <see cref="TranslationGlossaryEntry.TermKind"/>
+    /// so the service can compute the ambiguous-term set.
     /// </summary>
-    Task<Dictionary<string, string>> BuildLookupAsync(string language, CancellationToken cancellationToken);
+    Task<IReadOnlyList<TranslationGlossaryEntry>> LoadByLanguageAsync(string language, CancellationToken cancellationToken);
 }

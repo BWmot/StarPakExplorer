@@ -68,6 +68,17 @@ public sealed class GlossaryViewModel : ViewModelBase
 
     public IReadOnlyList<GlossaryEntrySource> SourceOptions { get; } = Enum.GetValues<GlossaryEntrySource>();
 
+    /// <summary>
+    /// Choices for the 类型 (term kind) column: null = 默认 (follow built-in rules),
+    /// Default = 普通 (always force-substitute), Ambiguous = 多义 (whole-segment match only).
+    /// </summary>
+    public IReadOnlyList<KeyValuePair<GlossaryTermKind?, string>> TermKindOptions { get; } =
+    [
+        new KeyValuePair<GlossaryTermKind?, string>(null, "默认"),
+        new KeyValuePair<GlossaryTermKind?, string>(GlossaryTermKind.Default, "普通"),
+        new KeyValuePair<GlossaryTermKind?, string>(GlossaryTermKind.Ambiguous, "多义")
+    ];
+
     /// <summary>Language codes available for the glossary (from settings).</summary>
     public IReadOnlyList<string> LanguageChoices { get; }
 
@@ -298,6 +309,7 @@ public sealed class GlossaryViewModel : ViewModelBase
                 EntrySource = row.EntrySource,
                 Category = string.IsNullOrWhiteSpace(row.Category) ? null : row.Category.Trim(),
                 Notes = string.IsNullOrWhiteSpace(row.Notes) ? null : row.Notes.Trim(),
+                TermKind = row.TermKind,
                 ModifiedAt = now
             }, lifetime.Token).ConfigureAwait(true);
 
@@ -337,6 +349,7 @@ public sealed class GlossaryViewModel : ViewModelBase
                 EntrySource = r.EntrySource,
                 Category = string.IsNullOrWhiteSpace(r.Category) ? null : r.Category.Trim(),
                 Notes = string.IsNullOrWhiteSpace(r.Notes) ? null : r.Notes.Trim(),
+                TermKind = r.TermKind,
                 ModifiedAt = DateTimeOffset.Now
             }).ToList();
 

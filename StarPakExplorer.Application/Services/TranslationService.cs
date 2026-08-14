@@ -290,11 +290,11 @@ public sealed class TranslationService : ITranslationService
             // reused within this project and synced to the global glossary below.
             // (Without this, new terms only land in the translation cache and never
             // reach the global glossary — the sync reads the project glossary.)
-            if (!glossary.TryGetValue(sourceText, out var current) ||
+            if (!glossary.Lookup.TryGetValue(sourceText, out var current) ||
                 !string.Equals(current, result, StringComparison.Ordinal))
             {
-                glossary[sourceText] = result;
-                await projectStore.SaveGlossaryAsync(project.ProjectKey, glossary, cancellationToken).ConfigureAwait(false);
+                glossary.Lookup[sourceText] = result;
+                await projectStore.SaveGlossaryAsync(project.ProjectKey, glossary.Lookup, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -646,49 +646,82 @@ public sealed class TranslationService : ITranslationService
             project.ProjectKey,
             fileCache.ToDictionary(pair => pair.Key, pair => (IDictionary<string, string>)pair.Value, StringComparer.OrdinalIgnoreCase),
             cancellationToken).ConfigureAwait(false);
-        await projectStore.SaveGlossaryAsync(project.ProjectKey, await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+        var mergedGlossary = await EnsureGlossaryAsync(project, cancellationToken).ConfigureAwait(false);
+        await projectStore.SaveGlossaryAsync(project.ProjectKey, mergedGlossary.Lookup, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<Dictionary<string, string>> EnsureGlossaryAsync(TranslationProgressDocument project, CancellationToken cancellationToken)
+    private async Task<TranslationGlossary> EnsureGlossaryAsync(TranslationProgressDocument project, CancellationToken cancellationToken)
     {
-        // Load project-local glossary. Normalize to case-insensitive so that
-        // case-variant duplicates (e.g. "apex"/"Apex") collapse instead of
-        // coexisting — matching the global glossary's COLLATE NOCASE semantics.
-        var glossary = await projectStore.LoadGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
-        if (glossary.Count > 0)
-        {
-            var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (key, value) in glossary)
-            {
-                normalized[key] = value; // last write wins on case-insensitive collision
-            }
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            glossary = normalized;
+        // Load project-local glossary; project entries override global fallback.
+        var projectGlossary = await projectStore.LoadGlossaryAsync(project.ProjectKey, cancellationToken).ConfigureAwait(false);
+        foreach (var (key, value) in projectGlossary)
+        {
+            lookup[key] = value;
         }
 
-        // Merge global glossary as fallback (project glossary overrides global).
-        // Lookup is scoped to the project's target language (e.g. zh-CN, zh-TW, ja),
-        // matching the language the translation engines are configured to produce.
+        // Merge global glossary as fallback, scoped to the target language.
         var targetLanguage = project.ProviderSettings.TargetLanguage;
-        var globalLookup = await globalGlossaryStore.BuildLookupAsync(targetLanguage, cancellationToken).ConfigureAwait(false);
-        foreach (var (key, value) in globalLookup)
+        var globalEntries = await globalGlossaryStore.LoadByLanguageAsync(targetLanguage, cancellationToken).ConfigureAwait(false);
+
+        // Track explicit term kinds from the DB so the built-in ambiguous set
+        // can be overridden per entry (Default = force-substitute even if the
+        // term is in the built-in ambiguous list).
+        var explicitKindBySource = new Dictionary<string, GlossaryTermKind?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in globalEntries)
         {
-            if (!glossary.ContainsKey(key))
+            explicitKindBySource[entry.Source] = entry.TermKind;
+            if (!lookup.ContainsKey(entry.Source))
             {
-                glossary[key] = value;
+                lookup[entry.Source] = entry.Target;
             }
         }
 
-        // If still empty, use the default (now loads from reference term banks)
-        if (glossary.Count == 0)
+        // If still empty, fall back to the built-in default glossary.
+        var defaultGlossary = TranslationTextTools.BuildDefaultGlossary();
+        if (lookup.Count == 0)
         {
-            glossary = TranslationTextTools.BuildDefaultGlossary();
+            foreach (var (key, value) in defaultGlossary.Lookup)
+            {
+                lookup[key] = value;
+            }
         }
 
-        // Save merged glossary back to project
-        await projectStore.SaveGlossaryAsync(project.ProjectKey, glossary, cancellationToken).ConfigureAwait(false);
+        // Assemble the ambiguous set: explicit DB entries win; built-in defaults
+        // fill the gaps unless explicitly marked Default.
+        var ambiguousTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in globalEntries)
+        {
+            if (entry.TermKind == GlossaryTermKind.Ambiguous)
+            {
+                ambiguousTerms.Add(entry.Source);
+            }
+        }
 
-        return glossary;
+        foreach (var term in defaultGlossary.AmbiguousTerms)
+        {
+            if (!lookup.ContainsKey(term))
+            {
+                continue;
+            }
+
+            if (explicitKindBySource.TryGetValue(term, out var kind) && kind == GlossaryTermKind.Default)
+            {
+                continue;
+            }
+
+            ambiguousTerms.Add(term);
+        }
+
+        // Save the merged lookup back to the project store.
+        await projectStore.SaveGlossaryAsync(project.ProjectKey, lookup, cancellationToken).ConfigureAwait(false);
+
+        return new TranslationGlossary
+        {
+            Lookup = lookup,
+            AmbiguousTerms = ambiguousTerms
+        };
     }
 
     private static TranslationFileState MergeFileState(
